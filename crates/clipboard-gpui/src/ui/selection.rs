@@ -20,14 +20,13 @@ impl ClipboardView {
             return;
         }
         self.batch_mode = true;
-        let loaded: HashSet<i64> = self.history.items.iter().map(|item| item.id).collect();
-        let mut next = HashSet::with_capacity(loaded.len());
-        for id in &loaded {
-            if !self.selected_ids.contains(id) {
-                next.insert(*id);
-            }
-        }
-        self.selected_ids = next;
+        self.selected_ids = self
+            .history
+            .items
+            .iter()
+            .map(|item| item.id)
+            .filter(|id| !self.selected_ids.contains(id))
+            .collect();
         self.selection_anchor = None;
         cx.notify();
     }
@@ -41,21 +40,16 @@ impl ClipboardView {
         if self.batch_pending || self.history.loading {
             return;
         }
-        if !self.history.items.iter().any(|item| item.id == id) {
+        if !toggle_batch_mark(
+            &mut self.selected_ids,
+            &self.history.items,
+            self.selection_anchor.filter(|_| extend_range),
+            id,
+        ) {
             return;
         }
         self.close_hover_preview("batch_selection", cx);
         self.batch_mode = true;
-        let ids: Vec<_> = self.history.items.iter().map(|item| item.id).collect();
-        let range = extend_range
-            .then_some(self.selection_anchor)
-            .flatten()
-            .and_then(|anchor| selection_range_ids(&ids, anchor, id));
-        if let Some(range) = range {
-            self.selected_ids.extend(range.iter().copied());
-        } else if !self.selected_ids.insert(id) {
-            self.selected_ids.remove(&id);
-        }
         self.selection_anchor = Some(id);
         if self.confirmation == Some(HistoryConfirmation::DeleteSelected) {
             self.close_history_confirmation(window, cx);

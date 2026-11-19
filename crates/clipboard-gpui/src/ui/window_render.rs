@@ -1,6 +1,6 @@
 use super::*;
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::status_bar::StatusBar;
+use gpui_kit::component::tooltip::Tooltip;
 use std::time::Duration;
 
 const PANEL_STATUS_OK_FOR: Duration = Duration::from_secs(3);
@@ -24,7 +24,7 @@ impl ClipboardView {
         if !std::mem::take(&mut self.feedback_pending) || self.message.is_empty() {
             return;
         }
-        // Keep the line on the main StatusBar; auto-clear so it does not stick forever.
+        // Clear transient feedback so the search field goes back to showing the mode.
         self.arm_panel_status_clear(cx);
         cx.notify();
 
@@ -40,15 +40,16 @@ impl ClipboardView {
             }
         }
 
-        // Main panel already shows the line; skip OS toast while it is visible.
-        let panel_visible = self
-            .main_window
-            .update(cx, |_, window, _| {
-                native_window::is_window_shown(window)
-                    && !native_window::is_window_minimized(window)
-            })
-            .unwrap_or(false);
-        if panel_visible {
+        // Only suppress the OS toast when the search field can show the feedback.
+        let search_visible = !self.onboarding_visible()
+            && self
+                .main_window
+                .update(cx, |_, window, _| {
+                    native_window::is_window_shown(window)
+                        && !native_window::is_window_minimized(window)
+                })
+                .unwrap_or(false);
+        if search_visible {
             return;
         }
 
@@ -84,51 +85,50 @@ impl ClipboardView {
         }));
     }
 
-    fn render_status(&self, window: &Window, cx: &Context<Self>) -> AnyElement {
-        let has_message = !self.message.is_empty();
-        let left = if has_message {
-            let color = if self.is_error {
-                cx.theme().danger
-            } else {
-                cx.theme().muted_foreground
-            };
-            div()
-                .min_w_0()
-                .text_size(px(visual::TEXT_SMALL))
-                .text_color(color)
-                .child(self.message.clone())
-        } else if self.reorder_pending || self.todo_reorder_pending {
-            div()
-                .text_size(px(visual::TEXT_SMALL))
-                .text_color(cx.theme().muted_foreground)
-                .child(tr(self.language, "正在保存顺序…", "Saving order…"))
-        } else {
-            div()
-                .min_w_0()
-                .text_size(px(visual::TEXT_SMALL))
-                .text_color(cx.theme().muted_foreground)
-                .child(self.paste_mode_label(window))
-        };
-        let right = div()
-            .flex_none()
-            .text_size(px(visual::TEXT_SMALL))
-            .text_color(cx.theme().muted_foreground)
-            .child(self.status_count_label());
-        div()
-            .flex_shrink_0()
-            .w_full()
-            .h(px(visual::STATUS_BAR_HEIGHT))
-            .cursor_grab()
-            .window_control_area(WindowControlArea::Drag)
-            .child(
-                StatusBar::new()
-                    .size_full()
-                    .h(px(visual::STATUS_BAR_HEIGHT))
-                    .px(px(PAGE_PADDING))
-                    .left(left)
-                    .right(right),
+    pub(super) fn render_search_status(&self, window: &Window, cx: &Context<Self>) -> Div {
+        let muted = cx.theme().muted_foreground;
+        let (status, color): (SharedString, _) = if !self.message.is_empty() {
+            (
+                self.message.clone().into(),
+                if self.is_error {
+                    cx.theme().danger
+                } else {
+                    muted
+                },
             )
-            .into_any_element()
+        } else if self.reorder_pending || self.todo_reorder_pending {
+            (
+                tr(self.language, "正在保存顺序…", "Saving order…").into(),
+                muted,
+            )
+        } else {
+            (self.paste_mode_label(window).into(), muted)
+        };
+        div()
+            .flex()
+            .items_center()
+            .gap(px(visual::SPACE_2))
+            .max_w((window.viewport_size().width - px(PAGE_PADDING * 2.)) * 0.6)
+            .text_size(px(visual::TEXT_SMALL))
+            .text_color(muted)
+            .child(
+                div()
+                    .id("search-status")
+                    .min_w_0()
+                    .truncate()
+                    .text_color(color)
+                    .child(status.clone())
+                    .tooltip(move |window, cx| Tooltip::new(status.clone()).build(window, cx)),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .gap(px(visual::SPACE_2))
+                    .whitespace_nowrap()
+                    .child("·")
+                    .child(self.status_count_label()),
+            )
     }
 
     fn status_count_label(&self) -> String {
@@ -242,7 +242,6 @@ impl Render for ClipboardView {
                     .min_h_0()
                     .child(self.render_content(window, cx)),
             )
-            .child(self.render_status(window, cx))
     }
 }
 

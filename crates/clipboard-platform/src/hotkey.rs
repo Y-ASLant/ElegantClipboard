@@ -332,7 +332,8 @@ mod paste_tests {
         ] {
             assert!(normalize_main_shortcut(invalid).is_err(), "{invalid}");
         }
-        let config = PasteShortcutConfig::default();
+        let mut config = PasteShortcutConfig::default();
+        config.set_slot(false, 1, "Alt+1".into()).unwrap();
         for shortcut in ["Alt+1", "Alt+Numpad1"] {
             assert!(
                 validate_paste_shortcuts(&config, &HotkeyPreference::Shortcut(shortcut.into()))
@@ -370,6 +371,7 @@ mod paste_tests {
         assert!(normalize_paste_shortcut("Win+1").is_err());
         let mut config = PasteShortcutConfig::default();
         assert!(validate_paste_shortcuts(&config, &HotkeyPreference::default()).is_ok());
+        config.set_slot(false, 1, "Alt+1".into()).unwrap();
         config.set_slot(true, 4, "Alt+Numpad1".into()).unwrap();
         assert!(validate_paste_shortcuts(&config, &HotkeyPreference::default()).is_err());
         config

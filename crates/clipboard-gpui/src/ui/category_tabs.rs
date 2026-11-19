@@ -1,6 +1,7 @@
 use super::*;
 use clipboard_core::ContentCategory;
 use clipboard_core::preferences::CategoryTabVisibility;
+use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 
 /// 分类标签的静态描述：(筛选值, 中文, 英文显示名, 英文无障碍名)。
 /// 「收藏」用 `None` 与 `favorites` 开关配对，且无障碍名更长（Favorites vs Favs）。
@@ -56,7 +57,7 @@ impl ClipboardView {
         )
     }
 
-    pub(super) fn toolbar_tab_index(&self) -> usize {
+    pub(super) fn toolbar_tab_index(&self, tabs: &[ToolbarTab]) -> usize {
         let active = if self.todos_open {
             ToolbarTab::Todos
         } else if self.history.favorite_only() {
@@ -64,25 +65,102 @@ impl ClipboardView {
         } else {
             ToolbarTab::Category(Some(self.history.category()))
         };
-        self.toolbar_tabs()
-            .iter()
-            .position(|tab| *tab == active)
-            .unwrap_or(0)
+        tabs.iter().position(|tab| *tab == active).unwrap_or(0)
     }
 
-    pub(super) fn toolbar_tab_text(&self, tab: ToolbarTab) -> (&'static str, &'static str) {
+    pub(super) fn render_category_filter(
+        &self,
+        available: Pixels,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let tabs = self.toolbar_tabs();
+        let active = self.toolbar_tab_index(&tabs);
+        let language = self.language;
+        // Kit's medium segmented rail has two 4px insets, 2px gaps and
+        // 12px on either side of each label.
+        let slot = (available - px(8. + 2. * (tabs.len() - 1) as f32)) / tabs.len() as f32;
+        let font_size = visual::FILTER_LABEL_SIZE.to_pixels(window.rem_size());
+        let fits = tabs.iter().all(|&tab| {
+            let (label, _) = Self::toolbar_tab_text(tab, language);
+            visual::toolbar_text_width(label.into(), font_size, window, cx) + px(24.) <= slot
+        });
+        let filter = if fits {
+            TabBar::new("history-category-tabs")
+                .w_full()
+                .segmented()
+                .h(px(visual::CONTROL_HEIGHT))
+                .max_width(slot)
+                .last_empty_space(div().w_0())
+                .selected_index(active)
+                .children(tabs.iter().map(|&tab| {
+                    let (label, accessible) = Self::toolbar_tab_text(tab, language);
+                    Tab::new()
+                        .min_w_0()
+                        .w(slot)
+                        .label(label)
+                        .aria_label(accessible)
+                        .flex_1()
+                }))
+                .on_click(cx.listener(move |this, index: &usize, window, cx| {
+                    if let Some(&tab) = tabs.get(*index) {
+                        this.select_toolbar_tab(tab, window, cx);
+                    }
+                }))
+                .into_any_element()
+        } else {
+            let (label, accessible) = Self::toolbar_tab_text(tabs[active], language);
+            let owner = cx.weak_entity();
+            let category = tr(self.language, "分类", "Category");
+            Button::new("history-category-menu")
+                .outline()
+                .w_full()
+                .h(px(visual::CONTROL_HEIGHT))
+                .dropdown_caret(true)
+                .accessibility_label(format!("{category}: {accessible}"))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(visual::FILTER_LABEL_SIZE)
+                        .child(format!("{category}: {label}")),
+                )
+                .dropdown_menu(move |menu, _, _| {
+                    let menu = menu.min_w(available).max_w(available);
+                    tabs.iter().enumerate().fold(menu, |menu, (index, &tab)| {
+                        let (_, name) = Self::toolbar_tab_text(tab, language);
+                        let owner = owner.clone();
+                        menu.item(PopupMenuItem::new(name).checked(index == active).on_click(
+                            move |_, window, cx| {
+                                let _ = owner.update(cx, |this, cx| {
+                                    this.select_toolbar_tab(tab, window, cx);
+                                });
+                            },
+                        ))
+                    })
+                })
+                .into_any_element()
+        };
+        div().flex_1().min_w_0().child(filter).into_any_element()
+    }
+
+    fn toolbar_tab_text(
+        tab: ToolbarTab,
+        language: LanguagePreference,
+    ) -> (&'static str, &'static str) {
         match tab {
             ToolbarTab::Todos => (
-                tr(self.language, "备忘录", "Memo"),
-                tr(self.language, "备忘录", "Memo"),
+                tr(language, "备忘录", "Memo"),
+                tr(language, "备忘录", "Memo"),
             ),
             ToolbarTab::Category(filter) => CATEGORY_TAB_SPECS
                 .iter()
                 .find(|(spec, ..)| *spec == filter)
                 .map(|(_, chinese, english, accessible)| {
                     (
-                        tr(self.language, chinese, english),
-                        tr(self.language, chinese, accessible),
+                        tr(language, chinese, english),
+                        tr(language, chinese, accessible),
                     )
                 })
                 .unwrap_or(("全部", "All")),

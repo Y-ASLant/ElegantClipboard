@@ -4,6 +4,7 @@ use clipboard_core::{
     database::ClipboardItem,
     preferences::{LanguagePreference, SourceAppDisplay, TimeFormat},
 };
+use indexmap::IndexSet;
 use std::collections::HashMap;
 
 /// Return whether to show the name and icon; icon-only falls back to the name.
@@ -78,12 +79,29 @@ pub fn format_card_time(
     }
 }
 
-/// IDs between two loaded rows, inclusive, in their current display order.
-/// An unloaded or filtered-out anchor does not define a range.
-pub fn selection_range_ids(ids: &[i64], anchor: i64, target: i64) -> Option<&[i64]> {
-    let from = ids.iter().position(|id| *id == anchor)?;
-    let to = ids.iter().position(|id| *id == target)?;
-    Some(&ids[from.min(to)..=from.max(to)])
+/// Append newly marked rows in click order, or from the anchor toward the Shift-click.
+pub(crate) fn toggle_batch_mark(
+    selected: &mut IndexSet<i64>,
+    items: &[ClipboardItem],
+    anchor: Option<i64>,
+    target: i64,
+) -> bool {
+    let Some(to) = items.iter().position(|item| item.id == target) else {
+        return false;
+    };
+    if let Some(from) = anchor.and_then(|id| items.iter().position(|item| item.id == id)) {
+        let range = items[from.min(to)..=from.max(to)]
+            .iter()
+            .map(|item| item.id);
+        if from <= to {
+            selected.extend(range);
+        } else {
+            selected.extend(range.rev());
+        }
+    } else if !selected.shift_remove(&target) {
+        selected.insert(target);
+    }
+    true
 }
 
 /// Pixel offsets from the old order to the committed order, using each row's actual height.

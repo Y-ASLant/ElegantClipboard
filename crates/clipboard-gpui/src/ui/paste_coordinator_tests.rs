@@ -39,10 +39,11 @@ fn cancellation_and_reentry_reject_late_receipts_failures_and_delivery() {
 }
 
 #[test]
-fn first_sequence_command_preserves_queue_and_advance_waits_for_delivery() {
+fn sequence_commands_preserve_queue_order_and_wait_for_delivery() {
     let mut state = PasteCoordinator::default();
-    assert!(state.start_sequence(vec![10, 20], (1, 2)));
+    assert!(state.start_sequence(vec![20, 10], (1, 2)));
     let first = state.advance_sequence(wait()).unwrap();
+    assert!(matches!(first, Command::Copy { id: 20, .. }));
     let first_request = request(&first);
     let interrupted = state.replace(&first).unwrap();
     assert!(!interrupted.sequence);
@@ -56,7 +57,7 @@ fn first_sequence_command_preserves_queue_and_advance_waits_for_delivery() {
     assert_eq!(state.complete_delivery(first_request), None);
     assert_eq!(state.sequence_remaining(), Some(1));
     let second = state.advance_sequence(wait()).unwrap();
-    assert!(matches!(second, Command::Copy { id: 20, .. }));
+    assert!(matches!(second, Command::Copy { id: 10, .. }));
     let second_request = request(&second);
     state.replace(&second);
     assert_eq!(recv(&mut state, first_request), None);

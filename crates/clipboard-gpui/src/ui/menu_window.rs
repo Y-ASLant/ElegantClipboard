@@ -331,6 +331,8 @@ impl Render for HistoryMenuWindow {
         #[cfg(not(target_os = "macos"))]
         window.set_background_appearance(WindowBackgroundAppearance::Transparent);
         use_card_radius(cx);
+        // This standalone menu has no Kit Root to apply the interface font scale.
+        window.set_rem_size(cx.theme().font_size);
         if self.menu.is_none()
             && let Some(build) = self.build.take()
         {
@@ -355,6 +357,7 @@ impl Render for HistoryMenuWindow {
             .flex()
             .flex_col()
             .items_start()
+            .font_family(cx.theme().font_family.clone())
             .on_mouse_down(MouseButton::Left, close_menu_window)
             .on_mouse_down(MouseButton::Right, close_menu_window)
             .when_some(menu, |layer, menu| {

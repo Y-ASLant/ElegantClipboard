@@ -194,7 +194,7 @@ Cool zinc neutrals carry structure; a single selectable accent carries all “th
 - **Label / small** (400, 12px): Settings descriptions, metadata, captions.
 - **Onboarding title exception:** 22px semibold / 30px line — local to first-run steps, not a global display scale.
 
-Default UI font size preference is 14px (user range constrained in preferences). Card and preview fonts inherit UI unless overridden.
+Default UI font size is 14px. The card family can follow the interface family, and the hover preview family can follow the card family. The three font sizes are independent.
 
 ### Named Rules
 **The No Display Face Rule.** Do not introduce a decorative display font for chrome. Hierarchy is size and weight only inside the system UI family.

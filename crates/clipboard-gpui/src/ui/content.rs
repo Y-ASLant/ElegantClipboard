@@ -30,8 +30,7 @@ impl ClipboardView {
                 cx.listener(ClipboardView::close_history_menu_from_press),
             )
             .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
-                this.search
-                    .update(cx, |search, cx| search.focus(window, cx));
+                this.focus_search_for_input(window, cx);
             }))
             .child(if let Some(height) = height {
                 chrome
@@ -56,53 +55,39 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let category_tab_count = self.toolbar_tabs().len().max(1) as f32;
-        let group_width = visual::group_select_width(
-            f32::from(window.viewport_size().width),
-            self.longest_group_label(window, cx),
-        );
-        // Deduct the group selector, row gap, and the Kit segmented-tab insets.
-        let category_width = (window.viewport_size().width
-            - px(PAGE_PADDING * 2. + group_width + visual::SPACE_2 * 2. + 6.))
-            / category_tab_count;
+        let search = Input::new(&self.search)
+            .with_size(gpui_kit::component::Size::Medium)
+            .text_size(visual::FILTER_LABEL_SIZE)
+            .rounded(cx.theme().radius)
+            .cleanable(true)
+            .prefix(Icon::new(IconName::Search).size(px(visual::ICON_SIZE)))
+            .suffix(self.render_search_status(window, cx));
         div()
             .flex()
             .flex_col()
             .w_full()
             .child(
                 div()
-                    .key_context("HistorySearch")
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _: &MouseDownEvent, window, cx| {
-                            this.activate_for_input(window, cx);
-                        }),
-                    )
-                    .flex_none()
                     .px(px(PAGE_PADDING))
                     .pb(px(visual::SPACE_2))
-                    .on_action(cx.listener(|this, _: &FocusFirstHistoryItem, window, cx| {
-                        this.focus_first_history_item(window, cx);
-                    }))
+                    .flex_none()
                     .child(
-                        Input::new(&self.search)
-                            .with_size(gpui_kit::component::Size::Medium)
-                            .text_size(px(visual::TEXT_BODY))
-                            .rounded(cx.theme().radius)
-                            .cleanable(true)
-                            .prefix(Icon::new(IconName::Search).size(px(visual::ICON_SIZE)))
-                            .suffix(
-                                Button::new("history-search-info")
-                                    .text()
-                                    .icon(Icon::new(IconName::Info).size(px(visual::ICON_SMALL)))
-                                    .xsmall()
-                                    .accessibility_label(tr(
-                                        self.language,
-                                        "搜索说明",
-                                        "Search help",
-                                    ))
-                                    .tooltip(self.search_help()),
-                            ),
+                        div()
+                            .key_context("HistorySearch")
+                            .on_action(cx.listener(
+                                |this, _: &FocusFirstHistoryItem, window, cx| {
+                                    this.focus_first_history_item(window, cx);
+                                },
+                            ))
+                            // Run after Kit places the caret. Its frame can take focus
+                            // without focusing the editor when an addon is clicked.
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _: &MouseDownEvent, window, cx| {
+                                    this.focus_search_for_input(window, cx);
+                                }),
+                            )
+                            .child(Styled::h(search, px(visual::CONTROL_HEIGHT))),
                     ),
             )
             .child(
@@ -113,22 +98,16 @@ impl ClipboardView {
                     .pb(px(visual::SPACE_2))
                     .flex_none()
                     // One chrome slot: filter tabs, or batch / move / locate — never stacked.
-                    .child(self.render_toolbar_slot(group_width, category_width, window, cx)),
+                    .child(self.render_toolbar_slot(window, cx)),
             )
             .into_any_element()
     }
 
     /// Filter row or a transient mode strip. Modes replace tabs; they do not stack under them.
-    fn render_toolbar_slot(
-        &mut self,
-        group_width: f32,
-        category_width: Pixels,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn render_toolbar_slot(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if self.batch_mode {
             return visual::reveal(
-                self.render_batch_strip(cx),
+                self.render_batch_strip(window, cx),
                 (
                     "batch-toolbar",
                     self.history.group_id().unwrap_or(0) as usize,
@@ -148,53 +127,29 @@ impl ClipboardView {
                 .render_locate_strip(position, total, cx)
                 .into_any_element();
         }
-        self.render_filter_toolbar(group_width, category_width, window, cx)
-            .into_any_element()
+        self.render_filter_toolbar(window, cx).into_any_element()
     }
 
-    fn render_filter_toolbar(
-        &mut self,
-        group_width: f32,
-        category_width: Pixels,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Div {
+    fn render_filter_toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> Div {
+        let group = (!self.todos_open).then(|| self.render_group_select(window, cx));
+        let mut category_space = window.viewport_size().width - px(PAGE_PADDING * 2.);
+        if let Some((width, _)) = &group {
+            category_space -= *width + px(visual::SPACE_2);
+        }
         div()
             .w_full()
             .flex()
             .items_center()
             .gap(px(visual::SPACE_2))
             .when(self.display.value.show_category_filter, |row| {
-                row.child(
-                    div().flex_1().min_w_0().child(
-                        TabBar::new("history-category-tabs")
-                            .w_full()
-                            .segmented()
-                            .h(px(visual::CONTROL_HEIGHT))
-                            .max_width(category_width)
-                            .last_empty_space(div().w_0())
-                            .selected_index(self.toolbar_tab_index())
-                            .on_click(cx.listener(|this, index: &usize, window, cx| {
-                                this.select_toolbar_tab(*index, window, cx);
-                            }))
-                            .children(self.toolbar_tabs().into_iter().map(|tab| {
-                                let (label, accessible) = self.toolbar_tab_text(tab);
-                                Tab::new()
-                                    .text_size(px(visual::TEXT_BODY))
-                                    .min_w_0()
-                                    .w(category_width)
-                                    .label(label)
-                                    .aria_label(accessible)
-                                    .flex_1()
-                            })),
-                    ),
-                )
+                row.child(self.render_category_filter(category_space, window, cx))
             })
             .when(
                 !self.display.value.show_category_filter && self.todo_preference.value.enabled,
                 |row| {
                     row.child(
                         Button::new("open-todos")
+                            .small()
                             .h(px(visual::CONTROL_HEIGHT))
                             .outline()
                             .selected(self.todos_open)
@@ -214,15 +169,12 @@ impl ClipboardView {
                     )
                 },
             )
-            .child(
-                div()
-                    .w(px(group_width))
-                    .flex_none()
-                    .child(self.render_group_select(group_width, window, cx)),
-            )
+            .when_some(group, |row, (width, trigger)| {
+                row.child(div().ml_auto().w(width).flex_none().child(trigger))
+            })
     }
 
-    fn render_batch_strip(&self, cx: &mut Context<Self>) -> Div {
+    fn render_batch_strip(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let can_merge_or_sequence =
             self.selected_ids.len() >= 2 && !self.batch_pending && !self.paste_state.pending();
         let sequence_hotkey_off = self.sequence_hotkey.trim().is_empty();
@@ -251,37 +203,57 @@ impl ClipboardView {
                 format!("剩 {remaining} · {}", self.sequence_hotkey)
             }
         });
-        let exit = Button::new("batch-exit")
-            .small()
-            .outline()
-            .label(tr(self.language, "退出", "Exit"))
+        let button_height = visual::CONTROL_HEIGHT - 2. * (visual::SPACE_1 + visual::BORDER_WIDTH);
+        // Keep room for both four-character labels at the minimum window width.
+        let (button_min_width, button_padding) = if window.viewport_size().width < px(400.) {
+            let padding = if window.rem_size() > px(visual::TEXT_BODY) {
+                visual::SPACE_1 / 2.
+            } else {
+                visual::SPACE_1
+            };
+            (visual::CONTROL_HEIGHT + visual::SPACE_3, padding)
+        } else {
+            (
+                visual::CONTROL_HEIGHT + 2. * visual::SPACE_3,
+                visual::SPACE_2,
+            )
+        };
+        let button = |id, label: &'static str| {
+            Button::new(id)
+                .outline()
+                .small()
+                .h(px(button_height))
+                .min_w(px(button_min_width))
+                .px(px(button_padding))
+                .label(label)
+        };
+        let exit = button("batch-exit", tr(self.language, "退出", "Exit"))
             .tooltip(tr(self.language, "退出多选", "Exit multi-select"))
             .disabled(self.batch_pending)
             .on_click(cx.listener(|this, _, _, cx| this.exit_batch_mode(cx)));
-        let invert = Button::new("batch-invert-selection")
-            .small()
-            .ghost()
-            .label(tr(self.language, "反选", "Invert"))
-            .tooltip(tr(
-                self.language,
-                "反选当前列表勾选",
-                "Invert selection on the loaded list",
-            ))
-            .disabled(self.batch_pending || self.history.items.is_empty())
-            .on_click(cx.listener(|this, _, _, cx| this.invert_batch_selection(cx)));
+        let invert = button(
+            "batch-invert-selection",
+            tr(self.language, "反选", "Invert"),
+        )
+        .tooltip(tr(
+            self.language,
+            "反选当前列表勾选",
+            "Invert selection on the loaded list",
+        ))
+        .disabled(self.batch_pending || self.history.items.is_empty())
+        .on_click(cx.listener(|this, _, _, cx| this.invert_batch_selection(cx)));
+        let delete_disabled = self.batch_pending || self.selected_ids.is_empty();
         let actions = div()
             .ml_auto()
             .flex()
-            .flex_none()
-            .flex_wrap()
+            .min_w_0()
             .items_center()
             .justify_end()
-            .gap(px(visual::SPACE_2))
+            .gap(px(visual::SPACE_1))
             .child(
-                Button::new("batch-merge")
-                    .small()
-                    .outline()
-                    .label(merge_label)
+                button("batch-merge", merge_label)
+                    .flex_shrink_1()
+                    .tooltip(merge_label)
                     .disabled(!can_merge_or_sequence)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.merge_selected(window, cx);
@@ -289,10 +261,8 @@ impl ClipboardView {
             )
             .when(sequence_status.is_none(), |row| {
                 row.child(
-                    Button::new("batch-sequence")
-                        .small()
-                        .outline()
-                        .label(tr(self.language, "序列粘贴", "Sequence"))
+                    button("batch-sequence", tr(self.language, "序列粘贴", "Sequence"))
+                        .flex_shrink_1()
                         .tooltip(sequence_hint)
                         .disabled(!sequence_ready)
                         .on_click(cx.listener(|this, _, window, cx| {
@@ -301,11 +271,12 @@ impl ClipboardView {
                 )
             })
             .child(
-                Button::new("batch-delete-open")
-                    .small()
+                button("batch-delete-open", tr(self.language, "删除", "Delete"))
                     .danger()
-                    .label(tr(self.language, "删除", "Delete"))
-                    .disabled(self.batch_pending || self.selected_ids.is_empty())
+                    .when(!delete_disabled, |button| {
+                        button.text_color(cx.theme().button_foreground)
+                    })
+                    .disabled(delete_disabled)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_history_confirmation(
                             HistoryConfirmation::DeleteSelected,
@@ -314,13 +285,18 @@ impl ClipboardView {
                         );
                     })),
             );
-        let mut strip = Self::mode_chrome_strip(cx).child(exit).child(invert);
+        let mut strip = Self::mode_chrome_strip(cx)
+            .p(px(visual::SPACE_1))
+            .h(px(visual::CONTROL_HEIGHT))
+            .gap(px(visual::SPACE_1))
+            .child(exit)
+            .child(invert);
         if let Some(status) = sequence_status {
             strip = strip.child(
                 div()
                     .flex_1()
                     .min_w_0()
-                    .px(px(visual::SPACE_2))
+                    .truncate()
                     .text_size(px(visual::TEXT_SMALL))
                     .text_color(cx.theme().muted_foreground)
                     .child(status),

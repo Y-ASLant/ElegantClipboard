@@ -230,13 +230,10 @@ impl SettingsWindowView {
         language: LanguagePreference,
         cx: &mut Context<Self>,
     ) -> Div {
-        let defaults = PasteShortcutConfig::default();
         settings_stack().gap_1().children((1..=10u8).map(|slot| {
             let shortcut = shortcuts.slot(favorite, slot).unwrap_or_default();
             let not_set = tr(language, "未设置", "Not set").to_owned();
-            let default = defaults.slot(favorite, slot).unwrap_or_default().to_owned();
             let owner_disable = self.owner.clone();
-            let owner_reset = self.owner.clone();
             settings_shortcut_row()
                 .py_2()
                 .when(slot < 10, |row| {
@@ -277,18 +274,6 @@ impl SettingsWindowView {
                             });
                         }),
                 )
-                .child(
-                    Button::new(format!("paste-slot-reset-{favorite}-{slot}"))
-                        .ghost()
-                        .small()
-                        .label(tr(language, "默认", "Default"))
-                        .disabled(pending || shortcut == default)
-                        .on_click(move |_, _, cx| {
-                            let _ = owner_reset.update(cx, |owner, cx| {
-                                owner.save_paste_shortcut(favorite, slot, &default, cx);
-                            });
-                        }),
-                )
                 .when(
                     self.shortcut_editing == Some(ShortcutTarget::Paste(favorite, slot)),
                     |row| row.child(self.shortcut_editor(language, pending, cx)),
@@ -303,38 +288,23 @@ impl SettingsWindowView {
         pending: bool,
         language: LanguagePreference,
     ) -> Div {
-        let defaults = PasteShortcutConfig::default();
-        let (current, defaults) = if favorite {
-            (&shortcuts.favorites, &defaults.favorites)
+        let current = if favorite {
+            &shortcuts.favorites
         } else {
-            (&shortcuts.recent, &defaults.recent)
+            &shortcuts.recent
         };
-        let reset_owner = self.owner.clone();
         let disable_owner = self.owner.clone();
-        settings_shortcut_row()
-            .child(
-                Button::new(format!("paste-{favorite}-reset-all"))
-                    .outline()
-                    .small()
-                    .label(tr(language, "全部恢复默认", "Restore all defaults"))
-                    .disabled(pending || current == defaults)
-                    .on_click(move |_, _, cx| {
-                        let _ = reset_owner.update(cx, |owner, cx| {
-                            owner.set_paste_shortcut_group_defaults(favorite, true, cx);
-                        });
-                    }),
-            )
-            .child(
-                Button::new(format!("paste-{favorite}-disable-all"))
-                    .outline()
-                    .small()
-                    .label(tr(language, "全部停用", "Disable all"))
-                    .disabled(pending || current.iter().all(String::is_empty))
-                    .on_click(move |_, _, cx| {
-                        let _ = disable_owner.update(cx, |owner, cx| {
-                            owner.set_paste_shortcut_group_defaults(favorite, false, cx);
-                        });
-                    }),
-            )
+        settings_shortcut_row().child(
+            Button::new(format!("paste-{favorite}-disable-all"))
+                .outline()
+                .small()
+                .label(tr(language, "全部停用", "Disable all"))
+                .disabled(pending || current.iter().all(String::is_empty))
+                .on_click(move |_, _, cx| {
+                    let _ = disable_owner.update(cx, |owner, cx| {
+                        owner.disable_paste_shortcut_group(favorite, cx);
+                    });
+                }),
+        )
     }
 }

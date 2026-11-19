@@ -16,7 +16,17 @@ pub(super) enum FontPickerTarget {
     Preview,
 }
 
-/// 下拉条目：`family == ""` 表示继承上一级默认，显示为 `label`。
+impl FontPickerTarget {
+    fn default_label(self, language: LanguagePreference) -> &'static str {
+        match self {
+            Self::Ui => tr(language, "系统默认", "System default"),
+            Self::Card => tr(language, "跟随界面字体", "Follow interface font"),
+            Self::Preview => tr(language, "跟随卡片字体", "Follow card font"),
+        }
+    }
+}
+
+/// 下拉条目：空字体名保留为默认或继承选项的存储值。
 #[derive(Clone)]
 pub(super) struct FontItem {
     family: SharedString,
@@ -37,33 +47,28 @@ impl SearchableListItem for FontItem {
 
 pub(super) type FontSelectState = SelectState<SearchableVec<FontItem>>;
 
-/// 首项是沿用上一级默认的占位项，其余为系统字体名。
 fn font_items(default_label: &'static str, saved_family: &str) -> Vec<FontItem> {
-    let mut items = Vec::with_capacity(crate::fonts::system_font_families().len() + 1);
+    let families = crate::fonts::system_font_families();
+    let families = &families[..families.len().min(400)];
+    let include_saved =
+        !saved_family.is_empty() && !families.iter().any(|name| name.as_str() == saved_family);
+    let mut items = Vec::with_capacity(families.len() + 1 + usize::from(include_saved));
     items.push(FontItem {
         family: "".into(),
         label: default_label.into(),
     });
-    // 已保存的字体可能已卸载：补进列表，避免显示成「未选择」。
-    if !saved_family.is_empty()
-        && !crate::fonts::system_font_families()
-            .iter()
-            .any(|name| name.as_str() == saved_family)
-    {
+    // Keep saved fonts selectable even if uninstalled or outside the displayed list.
+    if include_saved {
+        let family: SharedString = saved_family.into();
         items.push(FontItem {
-            family: saved_family.into(),
-            label: saved_family.into(),
+            label: family.clone(),
+            family,
         });
     }
-    items.extend(
-        crate::fonts::system_font_families()
-            .iter()
-            .take(400)
-            .map(|name| FontItem {
-                family: name.clone(),
-                label: name.clone(),
-            }),
-    );
+    items.extend(families.iter().map(|name| FontItem {
+        family: name.clone(),
+        label: name.clone(),
+    }));
     items
 }
 
@@ -89,15 +94,16 @@ impl SettingsWindowView {
     pub(super) fn bind_font_select(
         owner: &WeakEntity<ClipboardView>,
         fonts: &FontPreference,
-        default_label: &'static str,
+        language: LanguagePreference,
         target: FontPickerTarget,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> (Entity<FontSelectState>, Subscription) {
-        let items = font_items(default_label, saved_family(fonts, target));
+        let saved = saved_family(fonts, target);
+        let items = font_items(target.default_label(language), saved);
         let selected = items
             .iter()
-            .position(|item| item.family.as_str() == saved_family(fonts, target))
+            .position(|item| item.family.as_str() == saved)
             .unwrap_or(0);
         let select = cx.new(|cx| {
             SelectState::new(
@@ -134,23 +140,22 @@ impl SettingsWindowView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let default_label = tr(language, "系统默认", "System default");
-        let pairs: [(FontPickerTarget, Entity<FontSelectState>); 3] = [
-            (FontPickerTarget::Ui, self.ui_font_select.clone()),
-            (FontPickerTarget::Card, self.card_font_select.clone()),
-            (FontPickerTarget::Preview, self.preview_font_select.clone()),
+        let pairs = [
+            (FontPickerTarget::Ui, &self.ui_font_select),
+            (FontPickerTarget::Card, &self.card_font_select),
+            (FontPickerTarget::Preview, &self.preview_font_select),
         ];
         for (target, select) in pairs {
-            let saved = saved_family(fonts, target).to_string();
+            let saved = saved_family(fonts, target);
             select.update(cx, |select, cx| {
                 if language_changed {
                     select.set_items(
-                        SearchableVec::new(font_items(default_label, &saved)),
+                        SearchableVec::new(font_items(target.default_label(language), saved)),
                         window,
                         cx,
                     );
                 }
-                if select.selected_value().map(|v| v.as_str()) != Some(saved.as_str()) {
+                if select.selected_value().map(|v| v.as_str()) != Some(saved) {
                     select.set_selected_value(&saved.into(), window, cx);
                 }
             });
@@ -173,8 +178,8 @@ impl SettingsWindowView {
                             div().flex_1().min_w_0().child(settings_description(
                                 tr(
                                     language,
-                                    "界面、历史卡片与悬停预览可分别指定字体与字号；空选项沿用上一级默认。",
-                                    "Set interface, card, and hover preview fonts independently. An empty choice inherits from the level above.",
+                                    "卡片可跟随界面字体，悬停预览可跟随卡片字体。三处字号独立设置。",
+                                    "Cards can follow the interface font, and hover previews can follow the card font. Font sizes are set separately.",
                                 ),
                                 cx,
                             )),

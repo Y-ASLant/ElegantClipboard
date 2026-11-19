@@ -69,13 +69,50 @@ fn card_time_matches_absolute_and_relative_display_choices() {
 }
 
 #[test]
-fn selection_range_uses_loaded_display_order_in_both_directions() {
-    let ids = [14, 9, 7, 2];
-    assert_eq!(selection_range_ids(&ids, 9, 2), Some(&ids[1..=3]));
-    assert_eq!(selection_range_ids(&ids, 2, 9), Some(&ids[1..=3]));
-    assert_eq!(selection_range_ids(&ids, 7, 7), Some(&ids[2..=2]));
-    assert_eq!(selection_range_ids(&ids, 99, 7), None);
-    assert_eq!(selection_range_ids(&ids, 9, 99), None);
+fn sequence_selection_keeps_click_order_and_appends_shift_ranges() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let history = History::open(dir.path().join("history.db"))?;
+    for text in ["alpha", "beta", "gamma", "delta"] {
+        history.capture(text)?;
+    }
+    let rows = history.list("", PAGE_SIZE, false)?;
+    let [first, second, third, last] = rows.as_slice() else {
+        panic!("expected four history rows");
+    };
+    let mut selected = IndexSet::new();
+
+    for id in [last.id, first.id, second.id] {
+        assert!(toggle_batch_mark(&mut selected, &rows, None, id));
+    }
+    assert!(selected.iter().copied().eq([last.id, first.id, second.id]));
+
+    // Rechecking the first mark puts it last without moving the other two.
+    toggle_batch_mark(&mut selected, &rows, None, last.id);
+    toggle_batch_mark(&mut selected, &rows, None, last.id);
+    assert!(selected.iter().copied().eq([first.id, second.id, last.id]));
+
+    selected.clear();
+    toggle_batch_mark(&mut selected, &rows, None, last.id);
+    toggle_batch_mark(&mut selected, &rows, None, second.id);
+    toggle_batch_mark(&mut selected, &rows, Some(last.id), first.id);
+    assert!(
+        selected
+            .iter()
+            .copied()
+            .eq([last.id, second.id, third.id, first.id])
+    );
+
+    selected.clear();
+    toggle_batch_mark(&mut selected, &rows, Some(i64::MAX), second.id);
+    assert!(!toggle_batch_mark(
+        &mut selected,
+        &rows,
+        Some(second.id),
+        i64::MAX
+    ));
+    toggle_batch_mark(&mut selected, &rows, Some(second.id), last.id);
+    assert!(selected.iter().copied().eq([second.id, third.id, last.id]));
+    Ok(())
 }
 
 #[test]

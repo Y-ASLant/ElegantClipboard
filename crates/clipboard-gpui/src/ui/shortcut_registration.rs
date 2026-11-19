@@ -328,6 +328,7 @@ mod tests {
             .unwrap();
         assert!(next.validate().is_err());
         next = config();
+        next.slots.set_slot(false, 1, "Alt+1".into()).unwrap();
         next.sequence = next.slots.slot(false, 1).unwrap().into();
         assert!(next.validate().is_err());
         next = config();

@@ -19,14 +19,13 @@ pub(super) struct TodoDraft {
 impl ClipboardView {
     pub(super) fn select_toolbar_tab(
         &mut self,
-        index: usize,
+        tab: ToolbarTab,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        match self.toolbar_tabs().get(index).copied() {
-            Some(ToolbarTab::Todos) => self.open_todos(window, cx),
-            Some(ToolbarTab::Category(filter)) => self.select_category(filter, window, cx),
-            None => {}
+        match tab {
+            ToolbarTab::Todos => self.open_todos(window, cx),
+            ToolbarTab::Category(filter) => self.select_category(filter, window, cx),
         }
     }
 
@@ -70,31 +69,11 @@ impl ClipboardView {
         let placeholder = if self.todos_open {
             tr(self.language, "搜索备忘录…", "Search memos…")
         } else {
-            tr(
-                self.language,
-                "搜索剪贴板历史…",
-                "Search clipboard history…",
-            )
+            tr(self.language, "搜索剪贴板历史…", "Search history…")
         };
         self.search.update(cx, |input, cx| {
             input.set_placeholder(placeholder, window, cx)
         });
-    }
-
-    pub(super) fn search_help(&self) -> &'static str {
-        if self.todos_open {
-            tr(
-                self.language,
-                "输入关键词搜索备忘录；点击 × 清空搜索。",
-                "Search memos by keyword; click × to clear.",
-            )
-        } else {
-            tr(
-                self.language,
-                "输入关键词搜索剪贴板历史；点击 × 清空搜索。",
-                "Search clipboard history by keyword; click × to clear.",
-            )
-        }
     }
 
     pub(super) fn select_todo(&mut self, id: i64, cx: &mut Context<Self>) {
