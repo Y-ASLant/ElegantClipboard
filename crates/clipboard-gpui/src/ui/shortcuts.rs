@@ -175,30 +175,14 @@ impl ClipboardView {
         self.begin_shortcut_change(ShortcutChangeKind::Slots, next, cx);
     }
 
-    pub(super) fn set_paste_shortcut_group_defaults(
-        &mut self,
-        favorite: bool,
-        reset: bool,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn disable_paste_shortcut_group(&mut self, favorite: bool, cx: &mut Context<Self>) {
         let mut next = self.paste_shortcuts.clone();
-        let defaults = PasteShortcutConfig::default();
         let group = if favorite {
             &mut next.favorites
         } else {
             &mut next.recent
         };
-        for (index, shortcut) in group.iter_mut().enumerate() {
-            *shortcut = if reset {
-                if favorite {
-                    defaults.favorites[index].clone()
-                } else {
-                    defaults.recent[index].clone()
-                }
-            } else {
-                String::new()
-            };
-        }
+        group.iter_mut().for_each(String::clear);
         self.save_paste_shortcuts(next, cx);
     }
 

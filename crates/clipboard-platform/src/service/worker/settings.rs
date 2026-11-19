@@ -212,7 +212,9 @@ mod tests {
         let main = HotkeyPreference::Shortcut("Ctrl+Alt+F7".into());
         save_hotkey(&preferences, main.clone())?;
         let sequence = save_sequence_hotkey(&preferences, " alt + control + f8 ")?;
-        let slots = preferences.paste_shortcuts()?;
+        let mut slots = preferences.paste_shortcuts()?;
+        slots.set_slot(false, 1, "Alt+1".into())?;
+        save_paste_shortcuts(&preferences, &slots)?;
         assert!(save_hotkey(&preferences, HotkeyPreference::Shortcut(sequence.clone())).is_err());
         let mut conflicting = slots.clone();
         conflicting.set_slot(false, 1, sequence.clone())?;

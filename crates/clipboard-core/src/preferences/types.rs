@@ -184,7 +184,7 @@ impl MonitorTypesPreference {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PasteShortcutConfig {
     pub recent: [String; 10],
     pub favorites: [String; 10],
@@ -205,23 +205,6 @@ pub enum PasteDeliveryMode {
     Controlled,
     /// Quick-paste slots: allow chord repeat and inject after the slot key releases (Alt may stay down).
     Rapid,
-}
-
-impl Default for PasteShortcutConfig {
-    fn default() -> Self {
-        Self {
-            recent: std::array::from_fn(|index| {
-                format!("Alt+{}", if index == 9 { 0 } else { index + 1 })
-            }),
-            favorites: std::array::from_fn(|index| {
-                if index < 3 {
-                    format!("Ctrl+Alt+{}", index + 1)
-                } else {
-                    String::new()
-                }
-            }),
-        }
-    }
 }
 
 impl PasteShortcutConfig {

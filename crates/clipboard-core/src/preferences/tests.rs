@@ -239,11 +239,10 @@ fn paste_shortcut_slots_persist_and_invalid_stored_json_uses_defaults() -> Resul
     let db = Database::new(path.clone())?;
     let preferences = Preferences::new(&db);
     let mut shortcuts = preferences.paste_shortcuts()?;
-    assert_eq!(shortcuts.slot(false, 10), Some("Alt+0"));
-    assert_eq!(shortcuts.slot(true, 4), Some(""));
+    assert_slots_unbound(&shortcuts);
     assert_eq!(shortcuts.slot(true, 11), None);
     shortcuts.set_slot(true, 10, "Ctrl+Shift+Z".into())?;
-    shortcuts.set_slot(false, 1, String::new())?;
+    shortcuts.set_slot(false, 1, "Alt+1".into())?;
     assert!(shortcuts.set_slot(true, 0, String::new()).is_err());
     preferences.set_paste_shortcuts(&shortcuts)?;
     drop(preferences);
@@ -252,11 +251,16 @@ fn paste_shortcut_slots_persist_and_invalid_stored_json_uses_defaults() -> Resul
     let preferences = Preferences::new(&db);
     assert_eq!(preferences.paste_shortcuts()?, shortcuts);
     SettingsRepository::new(&db).set(PASTE_SHORTCUTS_KEY, "invalid")?;
-    assert_eq!(
-        preferences.paste_shortcuts()?,
-        PasteShortcutConfig::default()
-    );
+    assert_slots_unbound(&preferences.paste_shortcuts()?);
     Ok(())
+}
+
+fn assert_slots_unbound(shortcuts: &PasteShortcutConfig) {
+    for favorite in [false, true] {
+        for slot in 1..=10 {
+            assert_eq!(shortcuts.slot(favorite, slot), Some(""));
+        }
+    }
 }
 
 #[test]

@@ -261,10 +261,18 @@ impl ClipboardView {
                 format!("剩 {remaining} · {}", self.sequence_hotkey)
             }
         });
-        let button = |id| Button::new(id).small().px(px(visual::SPACE_1));
+        let button = |id| {
+            Button::new(id)
+                .small()
+                .min_h(px(visual::CONTROL_HEIGHT - visual::SPACE_1 * 2.))
+                .px(px(visual::SPACE_1))
+        };
+        let exit_label = tr(self.language, "退出", "Exit");
         let exit = button("batch-exit")
+            .min_w(px(visual::CONTROL_HEIGHT + visual::SPACE_3 * 2.))
             .outline()
-            .label(tr(self.language, "退出", "Exit"))
+            .accessibility_label(exit_label)
+            .child(div().text_size(px(visual::TEXT_BODY)).child(exit_label))
             .tooltip(tr(self.language, "退出多选", "Exit multi-select"))
             .disabled(self.batch_pending)
             .on_click(cx.listener(|this, _, _, cx| this.exit_batch_mode(cx)));
