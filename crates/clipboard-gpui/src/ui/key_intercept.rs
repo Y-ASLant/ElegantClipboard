@@ -50,8 +50,13 @@ impl ClipboardView {
         self.activate_for_input(window, cx);
     }
 
+    pub(super) fn focus_search_for_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.search.update(cx, |input, cx| input.focus(window, cx));
+        self.activate_for_input(window, cx);
+    }
+
     /// Text input needs real focus for the IME; navigation works without it.
-    pub(super) fn activate_for_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn activate_for_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if window.is_window_active() || self.typing_activation.is_some() {
             return;
         }

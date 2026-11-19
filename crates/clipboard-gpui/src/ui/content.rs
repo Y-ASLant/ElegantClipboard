@@ -30,8 +30,7 @@ impl ClipboardView {
                 cx.listener(ClipboardView::close_history_menu_from_press),
             )
             .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
-                this.search
-                    .update(cx, |search, cx| search.focus(window, cx));
+                this.focus_search_for_input(window, cx);
             }))
             .child(if let Some(height) = height {
                 chrome
@@ -56,33 +55,39 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let search = Input::new(&self.search)
+            .with_size(gpui_kit::component::Size::Medium)
+            .text_size(px(visual::TEXT_BODY))
+            .rounded(cx.theme().radius)
+            .cleanable(true)
+            .prefix(Icon::new(IconName::Search).size(px(visual::ICON_SIZE)))
+            .suffix(self.render_search_status(window, cx));
         div()
             .flex()
             .flex_col()
             .w_full()
             .child(
                 div()
-                    .key_context("HistorySearch")
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _: &MouseDownEvent, window, cx| {
-                            this.activate_for_input(window, cx);
-                        }),
-                    )
-                    .flex_none()
                     .px(px(PAGE_PADDING))
                     .pb(px(visual::SPACE_2))
-                    .on_action(cx.listener(|this, _: &FocusFirstHistoryItem, window, cx| {
-                        this.focus_first_history_item(window, cx);
-                    }))
+                    .flex_none()
                     .child(
-                        Input::new(&self.search)
-                            .with_size(gpui_kit::component::Size::Medium)
-                            .text_size(px(visual::TEXT_BODY))
-                            .rounded(cx.theme().radius)
-                            .cleanable(true)
-                            .prefix(Icon::new(IconName::Search).size(px(visual::ICON_SIZE)))
-                            .suffix(self.render_search_status(window, cx)),
+                        div()
+                            .key_context("HistorySearch")
+                            .on_action(cx.listener(
+                                |this, _: &FocusFirstHistoryItem, window, cx| {
+                                    this.focus_first_history_item(window, cx);
+                                },
+                            ))
+                            // Run after Kit places the caret. Its frame can take focus
+                            // without focusing the editor when an addon is clicked.
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _: &MouseDownEvent, window, cx| {
+                                    this.focus_search_for_input(window, cx);
+                                }),
+                            )
+                            .child(Styled::h(search, px(visual::CONTROL_HEIGHT))),
                     ),
             )
             .child(
@@ -144,6 +149,7 @@ impl ClipboardView {
                 |row| {
                     row.child(
                         Button::new("open-todos")
+                            .small()
                             .h(px(visual::CONTROL_HEIGHT))
                             .outline()
                             .selected(self.todos_open)

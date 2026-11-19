@@ -86,8 +86,9 @@ impl ClipboardView {
         // Kit's medium segmented rail has two 4px insets, 2px gaps and
         // 12px on either side of each label.
         let slot = (available - px(8. + 2. * (labels.len() - 1) as f32)) / labels.len() as f32;
+        let font_size = visual::FILTER_LABEL_SIZE.to_pixels(window.rem_size());
         let fits = labels.iter().all(|&(label, _)| {
-            visual::toolbar_text_width(label.into(), window, cx) + px(24.) <= slot
+            visual::toolbar_text_width(label.into(), font_size, window, cx) + px(24.) <= slot
         });
         let filter = if fits {
             TabBar::new("history-category-tabs")
@@ -102,7 +103,6 @@ impl ClipboardView {
                 }))
                 .children(labels.into_iter().map(|(label, accessible)| {
                     Tab::new()
-                        .text_size(px(visual::TEXT_BODY))
                         .min_w_0()
                         .w(slot)
                         .label(label)
@@ -125,10 +125,11 @@ impl ClipboardView {
                         .flex_1()
                         .min_w_0()
                         .truncate()
-                        .text_size(px(visual::TEXT_BODY))
+                        .text_size(visual::FILTER_LABEL_SIZE)
                         .child(format!("{category}: {label}")),
                 )
                 .dropdown_menu(move |menu, _, _| {
+                    let menu = menu.min_w(available).max_w(available);
                     labels
                         .iter()
                         .enumerate()

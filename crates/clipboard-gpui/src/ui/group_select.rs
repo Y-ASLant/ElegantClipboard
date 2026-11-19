@@ -136,7 +136,12 @@ impl ClipboardView {
             .unwrap_or_else(|| tr(self.language, "默认分组", "Default group").into());
         let width = px(visual::group_select_width(
             f32::from(window.viewport_size().width),
-            f32::from(visual::toolbar_text_width(title.clone(), window, cx)),
+            f32::from(visual::toolbar_text_width(
+                title.clone(),
+                visual::FILTER_LABEL_SIZE.to_pixels(window.rem_size()),
+                window,
+                cx,
+            )),
         ));
         let owner = cx.entity().downgrade();
         let selected_focus = window
@@ -176,7 +181,7 @@ impl ClipboardView {
                             .flex_1()
                             .min_w_0()
                             .truncate()
-                            .text_size(px(visual::TEXT_BODY))
+                            .text_size(visual::FILTER_LABEL_SIZE)
                             .child(title),
                     )
                     .dropdown_caret(true)
@@ -197,14 +202,6 @@ impl ClipboardView {
                     .group_id()
                     .map_or(GroupChoice::Default, GroupChoice::Existing);
                 let options = group_options(&view.groups, view.language, view.history.group_id());
-                let menu_width = options.iter().fold(width, |current, option| {
-                    current.max(
-                        visual::toolbar_text_width(option.title.clone(), window, cx)
-                            + px(visual::GROUP_SELECT_CHROME),
-                    )
-                });
-                let menu_width =
-                    menu_width.min(window.viewport_size().width - px(2. * PAGE_PADDING));
                 let focus_handles: Vec<_> = options
                     .iter()
                     .enumerate()
@@ -245,6 +242,7 @@ impl ClipboardView {
                             .px(px(6.))
                             .track_focus(&focus_handles[index])
                             .accessibility_label(option.title.clone())
+                            .tooltip(option.title.clone())
                             .selected(choice == selected)
                             .text_color(cx.theme().foreground)
                             .when(choice == selected, |button| button.bg(cx.theme().accent))
@@ -312,7 +310,7 @@ impl ClipboardView {
                     .occlude()
                     .popover_style(cx)
                     .p(px(4.))
-                    .w(menu_width)
+                    .w(width)
                     .child(list)
                     .into_any_element()
             });

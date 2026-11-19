@@ -139,13 +139,21 @@ pub fn thumbnail_size(density: CardDensity) -> (f32, f32) {
         CardDensity::Spacious => (140., 88.),
     }
 }
-pub(crate) fn toolbar_text_width(text: SharedString, window: &Window, cx: &App) -> Pixels {
+/// GPUI Kit's medium segmented tabs use `text_sm` (0.875 rem).
+pub(crate) const FILTER_LABEL_SIZE: Rems = rems(0.875);
+
+pub(crate) fn toolbar_text_width(
+    text: SharedString,
+    font_size: Pixels,
+    window: &Window,
+    cx: &App,
+) -> Pixels {
     let mut style = window.text_style();
     style.font_family = cx.theme().font_family.clone();
     let run = style.to_run(text.len());
     window
         .text_system()
-        .shape_line(text, px(TEXT_BODY), &[run], None)
+        .shape_line(text, font_size, &[run], None)
         .width
 }
 
