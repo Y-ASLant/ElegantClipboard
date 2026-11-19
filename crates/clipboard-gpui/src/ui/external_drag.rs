@@ -7,6 +7,24 @@ mod preview;
 use super::todo_drag::TodoDrag;
 pub(super) use preview::DragPreview;
 
+fn drag_screen_scale(window: &Window) -> f32 {
+    if cfg!(target_os = "macos") {
+        // AppKit reports screen positions in logical points.
+        1.
+    } else {
+        window.scale_factor()
+    }
+}
+
+fn drag_client_point(
+    source: isize,
+    pointer: native::DragPointerState,
+    window: &Window,
+) -> anyhow::Result<Point<Pixels>> {
+    let (x, y) = native::drag_pointer_in_client(source, pointer, drag_screen_scale(window))?;
+    Ok(point(px(x), px(y)))
+}
+
 #[derive(Clone)]
 pub(super) enum CardDrag {
     History(Rc<HistoryDrag>),
@@ -48,9 +66,18 @@ impl CardDrag {
         }
     }
 
-    fn drop_card(&self, view: &mut ClipboardView, cx: &mut Context<ClipboardView>) {
+    fn drop_card(
+        &self,
+        view: &mut ClipboardView,
+        pointer: Point<Pixels>,
+        cx: &mut Context<ClipboardView>,
+    ) {
         match self {
-            Self::History(drag) => view.drop_history_card(drag, cx),
+            Self::History(drag) => {
+                if !view.drop_history_favorite_at(drag, pointer, cx) {
+                    view.drop_history_card(drag, cx);
+                }
+            }
             Self::Todo(drag) => view.drop_todo(drag, cx),
         }
     }
@@ -160,16 +187,12 @@ impl ClipboardView {
         if dimensions.width <= px(0.) || dimensions.height <= px(0.) {
             return false;
         }
-        let scale = if cfg!(target_os = "macos") {
-            1.0
-        } else {
-            window.scale_factor()
-        };
+        let scale = drag_screen_scale(window);
         let offset = (
             (f32::from(cursor_offset.x) * scale).round() as i32,
             (f32::from(cursor_offset.y) * scale).round() as i32,
         );
-        let Some(preview_hwnd) = self.open_drag_preview(&drag, window, cx) else {
+        let Some((preview_window, preview_hwnd)) = self.open_drag_preview(&drag, window, cx) else {
             return false;
         };
         let token = if let Some(id) = drag.paste_id() {
@@ -227,6 +250,7 @@ impl ClipboardView {
                 return;
             }
             let mut last_position = None;
+            let mut last_dimmed = false;
             let (sender, receiver) = async_channel::bounded(1);
             let frame_pending = Rc::new(Cell::new(false));
             loop {
@@ -241,7 +265,9 @@ impl ClipboardView {
                     let session = this.external_drag.as_ref().filter(|session| session.token == token)?;
                     let source = session.source_hwnd;
                     let drag = session.drag.clone();
-                    if native::drag_escape_pressed() {
+                    // A focused panel handles Escape through DismissOrHide. Polling
+                    // too could cancel first and then let the same key hide the panel.
+                    if !window.is_window_active() && native::drag_escape_pressed() {
                         this.finish_external_drag(cx);
                         return None;
                     }
@@ -257,17 +283,26 @@ impl ClipboardView {
                             return None;
                         }
                     };
-                    if !outside {
-                        if let Ok((x, y)) = native::drag_pointer_in_client(source, pointer, if cfg!(target_os = "macos") { 1.0 } else { window.scale_factor() }) {
-                            this.update_card_drag_target(&drag, point(px(x), px(y)), cx);
-                        }
-                    } else {
+                    let client_pointer = if outside {
                         this.card_drag_direction = 0;
-                    }
+                        this.set_favorite_drop_hovered(false, cx);
+                        None
+                    } else {
+                        match drag_client_point(source, pointer, window) {
+                            Ok(pointer) => {
+                                this.update_card_drag_target(&drag, pointer, cx);
+                                Some(pointer)
+                            }
+                            Err(error) => {
+                                this.fail_card_drag(format!("{error:#}"), cx);
+                                return None;
+                            }
+                        }
+                    };
                     if !pointer.left_button_down {
                         // Release is committed here even if GPUI never received MouseUp.
-                        if !outside { drag.drop_card(this, cx); }
-                        else if drag.paste_id().is_some() { this.set_feedback_message(tr(this.language,
+                        if let Some(pointer) = client_pointer { drag.drop_card(this, pointer, cx); }
+                        else if outside && drag.paste_id().is_some() { this.set_feedback_message(tr(this.language,
                             "拖放尚未就绪，请按住卡片移出窗口后再松开",
                             "Drag was not ready. Hold the card outside the window before releasing.").into());
                             this.is_error = true; }
@@ -285,13 +320,23 @@ impl ClipboardView {
                     };
                     let session = this.external_drag.as_mut()?;
                     session.native_active = payload.is_some();
-                    Some((session.preview_hwnd, session.offset, payload, ExternalDragOptions {
+                    let position = (pointer.x - session.offset.0, pointer.y - session.offset.1);
+                    let dimmed = client_pointer.zip(drag.history()).is_some_and(|(pointer, drag)| {
+                        drag.overlaps_favorite_strip(pointer - cursor_offset)
+                    });
+                    Some((session.preview_hwnd, position, dimmed, payload, ExternalDragOptions {
                         source_window: source, preview_window: Some(session.preview_hwnd),
                         preview_offset: session.offset,
                     }))
                 });
-                let Ok(Some((preview, offset, payload, options))) = state else { break; };
-                let position = (pointer.x - offset.0, pointer.y - offset.1);
+                let Ok(Some((preview, position, dimmed, payload, options))) = state else { break; };
+                if last_dimmed != dimmed {
+                    let _ = preview_window.update(cx, |preview, _, cx| {
+                        preview.dimmed = dimmed;
+                        cx.notify();
+                    });
+                    last_dimmed = dimmed;
+                }
                 // Native movement may re-enter GPUI. Never hold App/Window borrows here.
                 if last_position != Some(position) {
                     let movement = native::move_drag_preview(preview, position.0, position.1)
@@ -318,12 +363,16 @@ impl ClipboardView {
                         match result {
                             Ok(ExternalDragOutcome::ReturnedToSource) => true,
                             Ok(ExternalDragOutcome::ReleasedInSource) => {
-                                if let Ok(pointer) = native::poll_drag_pointer()
-                                    && let Ok((x, y)) = native::drag_pointer_in_client(options.source_window, pointer, if cfg!(target_os = "macos") { 1.0 } else { window.scale_factor() }) {
-                                    this.update_card_drag_target(&drag, point(px(x), px(y)), cx);
-                                    drag.drop_card(this, cx);
+                                match native::poll_drag_pointer()
+                                    .and_then(|pointer| drag_client_point(options.source_window, pointer, window))
+                                {
+                                    Ok(pointer) => {
+                                        this.update_card_drag_target(&drag, pointer, cx);
+                                        drag.drop_card(this, pointer, cx);
+                                        this.finish_external_drag(cx);
+                                    }
+                                    Err(error) => this.fail_card_drag(format!("{error:#}"), cx),
                                 }
-                                this.finish_external_drag(cx);
                                 false
                             }
                             Ok(_) => { this.finish_external_drag(cx); false }
@@ -368,6 +417,10 @@ impl ClipboardView {
         pointer: Point<Pixels>,
         cx: &mut Context<Self>,
     ) {
+        let over_favorites = drag
+            .history()
+            .is_some_and(|drag| self.history_favorite_drop_at(drag, pointer));
+        self.set_favorite_drop_hovered(over_favorites, cx);
         let Some(bounds) = self.drag_viewport.get() else {
             return;
         };
@@ -424,6 +477,8 @@ impl ClipboardView {
     }
 
     pub(super) fn finish_external_drag(&mut self, cx: &mut Context<Self>) {
+        self.history_drag_uses_gpui = false;
+        self.favorite_drop_hovered = false;
         if self.external_drag.take().is_some() {
             self.drag_preparation = None;
             self.drag_release_pending = true;

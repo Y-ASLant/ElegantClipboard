@@ -35,6 +35,9 @@ impl ClipboardView {
                         return;
                     }
                     let y = event.event.position.y;
+                    let over_favorites =
+                        this.history_favorite_drop_at(event.drag(cx), event.event.position);
+                    this.set_favorite_drop_hovered(over_favorites, cx);
                     let inside = event.bounds.contains(&event.event.position);
                     let direction = if !inside {
                         0

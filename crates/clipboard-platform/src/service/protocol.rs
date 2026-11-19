@@ -154,6 +154,10 @@ pub enum Command {
     ClearAllHistory,
     TogglePin(i64),
     ToggleFavorite(i64),
+    SetFavorite {
+        id: i64,
+        favorite: bool,
+    },
     Pause(bool),
     SetTheme(ThemePreference),
     SetThemeColor(ThemeColor),

@@ -1,6 +1,11 @@
 use super::{ClipboardRepository, NewClipboardItem};
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{OptionalExtension, TransactionBehavior, params};
 use tracing::debug;
+
+enum FavoriteChange {
+    Toggle,
+    Set(bool),
+}
 
 impl ClipboardRepository {
     pub fn insert(&self, item: NewClipboardItem) -> Result<i64, rusqlite::Error> {
@@ -166,23 +171,39 @@ impl ClipboardRepository {
     }
 
     pub fn toggle_favorite(&self, id: i64) -> Result<bool, rusqlite::Error> {
-        let conn = self.write_conn.lock();
-        let was_favorite: bool = conn.query_row(
+        self.change_favorite(id, FavoriteChange::Toggle)
+            .map(|was_favorite| !was_favorite)
+    }
+
+    /// Set the favorite state, returning whether it changed.
+    pub fn set_favorite(&self, id: i64, favorite: bool) -> Result<bool, rusqlite::Error> {
+        self.change_favorite(id, FavoriteChange::Set(favorite))
+            .map(|was_favorite| was_favorite != favorite)
+    }
+
+    /// Returns the previous state, including when the mutation is a no-op.
+    fn change_favorite(&self, id: i64, change: FavoriteChange) -> Result<bool, rusqlite::Error> {
+        let mut conn = self.write_conn.lock();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let was_favorite: bool = tx.query_row(
             "SELECT is_favorite FROM clipboard_items WHERE id = ?1",
             params![id],
             |row| row.get(0),
         )?;
-        let favorite = !was_favorite;
-        let tx = conn.unchecked_transaction()?;
+        let favorite = match change {
+            FavoriteChange::Toggle => !was_favorite,
+            FavoriteChange::Set(favorite) => favorite,
+        };
+        if favorite == was_favorite {
+            return Ok(was_favorite);
+        }
 
         if favorite {
-            let max_favorite_order: i64 = tx
-                .query_row(
-                    "SELECT COALESCE(MAX(favorite_order), 0) FROM clipboard_items WHERE is_favorite = 1",
-                    [],
-                    |row| row.get(0),
-                )
-                .unwrap_or(0);
+            let max_favorite_order: i64 = tx.query_row(
+                "SELECT COALESCE(MAX(favorite_order), 0) FROM clipboard_items WHERE is_favorite = 1",
+                [],
+                |row| row.get(0),
+            )?;
             tx.execute(
                 "UPDATE clipboard_items
                  SET is_favorite = 1, favorite_order = ?1
@@ -199,7 +220,7 @@ impl ClipboardRepository {
         }
 
         tx.commit()?;
-        Ok(favorite)
+        Ok(was_favorite)
     }
 
     pub fn delete(&self, id: i64) -> Result<(), rusqlite::Error> {

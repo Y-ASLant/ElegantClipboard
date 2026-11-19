@@ -241,6 +241,137 @@ fn worker_keeps_favorite_filter_during_capture_and_toggle() -> Result<()> {
 }
 
 #[test]
+fn worker_set_favorite_add_is_idempotent_and_preserves_history_order() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let history = History::open(directory.path().join("clipboard.db"))?;
+    let previous = history.capture("favorite %_ outside group")?.unwrap();
+    history.toggle_favorite(previous)?;
+    let previous_order = history.item(previous)?.favorite_order;
+    let group = history.create_group("Drop target fixture")?;
+    let id = history.capture("favorite %_ in group")?.unwrap();
+    history.move_to_group(id, None, Some(group.id))?;
+    history.toggle_pin(id)?;
+    let before = history.item(id)?;
+    drop(history);
+
+    let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+    next_snapshot(&events, 0);
+    service.send(Command::Query {
+        search: "%_".into(),
+        favorite_only: true,
+        category: ContentCategory::Text,
+        group_id: Some(group.id),
+        limit: PAGE_SIZE,
+        generation: 1,
+    })?;
+    assert!(next_snapshot(&events, 1).is_empty());
+
+    service.send(Command::SetFavorite { id, favorite: true })?;
+    let added = next_snapshot(&events, 1);
+    let [added] = added.as_slice() else {
+        bail!("添加收藏后未返回唯一的匹配记录");
+    };
+    assert_eq!(added.id, id);
+    assert!(added.is_favorite);
+    assert_eq!(added.favorite_order, previous_order + 1);
+    assert_eq!(added.sort_order, before.sort_order);
+    assert_eq!(added.group_id, before.group_id);
+    assert_eq!(added.is_pinned, before.is_pinned);
+
+    service.send(Command::SetFavorite { id, favorite: true })?;
+    service.send(Command::Query {
+        search: "%_".into(),
+        favorite_only: true,
+        category: ContentCategory::Text,
+        group_id: Some(group.id),
+        limit: PAGE_SIZE,
+        generation: 2,
+    })?;
+    let Event::Snapshot {
+        items,
+        generation: 2,
+        ..
+    } = next_event(&events)
+    else {
+        bail!("重复添加收藏不应发出反馈或刷新，下一事件应来自主动查询");
+    };
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].id, id);
+    assert!(items[0].is_favorite);
+    assert_eq!(items[0].favorite_order, added.favorite_order);
+
+    service.send(Command::SetFavorite {
+        id: i64::MAX,
+        favorite: true,
+    })?;
+    assert!(matches!(next_event(&events), Event::CommandFailed { .. }));
+    Ok(())
+}
+
+#[test]
+fn worker_set_favorite_remove_preserves_the_pinned_record() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let history = History::open(directory.path().join("clipboard.db"))?;
+    let id = history.capture("pinned favorite text")?.unwrap();
+    history.toggle_pin(id)?;
+    history.toggle_favorite(id)?;
+    let before = history.item(id)?;
+    drop(history);
+
+    let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+    next_snapshot(&events, 0);
+    service.send(Command::Query {
+        search: String::new(),
+        favorite_only: true,
+        category: ContentCategory::All,
+        group_id: None,
+        limit: PAGE_SIZE,
+        generation: 1,
+    })?;
+    assert_eq!(next_snapshot(&events, 1)[0].id, id);
+
+    service.send(Command::SetFavorite {
+        id,
+        favorite: false,
+    })?;
+    assert!(next_snapshot(&events, 1).is_empty());
+    service.send(Command::SetFavorite {
+        id,
+        favorite: false,
+    })?;
+    service.send(Command::Query {
+        search: String::new(),
+        favorite_only: false,
+        category: ContentCategory::All,
+        group_id: None,
+        limit: PAGE_SIZE,
+        generation: 2,
+    })?;
+    let Event::Snapshot {
+        items,
+        generation: 2,
+        ..
+    } = next_event(&events)
+    else {
+        bail!("重复取消收藏不应发出反馈或刷新，下一事件应来自主动查询");
+    };
+    let [item] = items.as_slice() else {
+        bail!("取消收藏后记录应仍在普通列表");
+    };
+    assert_eq!(
+        (
+            item.id,
+            item.is_favorite,
+            item.favorite_order,
+            item.is_pinned,
+            item.sort_order,
+        ),
+        (id, false, 0, true, before.sort_order),
+    );
+    Ok(())
+}
+
+#[test]
 fn worker_keeps_category_filter_when_history_changes() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;

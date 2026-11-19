@@ -7,12 +7,19 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if self.onboarding_visible() {
+            self.favorite_drop_bounds.set(None);
             return self.render_onboarding(window, cx).into_any_element();
         }
         let chrome = self.list_chrome.clone();
         // GPUI's cached replay omits semantic nodes; rebuild for connected accessibility clients.
         let cache_subtrees = !window.is_a11y_active();
-        let height = chrome.read(cx).height.get().filter(|_| cache_subtrees);
+        // During a history drag, refresh the drop geometry and visual state rather than
+        // replaying a previous prepaint (whose canvas would not run).
+        let height = chrome
+            .read(cx)
+            .height
+            .get()
+            .filter(|_| cache_subtrees && !self.favorite_history_drag_active(cx));
         div()
             .key_context("ClipboardApp")
             .flex()
@@ -97,7 +104,7 @@ impl ClipboardView {
                     .px(px(PAGE_PADDING))
                     .pb(px(visual::SPACE_2))
                     .flex_none()
-                    // One chrome slot: filter tabs, or batch / move / locate — never stacked.
+                    // Filters, mode controls, and the drag target share one row.
                     .child(self.render_toolbar_slot(window, cx)),
             )
             .into_any_element()
@@ -105,6 +112,7 @@ impl ClipboardView {
 
     /// Filter row or a transient mode strip. Modes replace tabs; they do not stack under them.
     fn render_toolbar_slot(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        self.favorite_drop_bounds.set(None);
         if self.batch_mode {
             return visual::reveal(
                 self.render_batch_strip(window, cx),
@@ -127,7 +135,62 @@ impl ClipboardView {
                 .render_locate_strip(position, total, cx)
                 .into_any_element();
         }
+        if !self.todos_open && self.favorite_history_drag_active(cx) {
+            return self.render_favorite_drop_strip(cx).into_any_element();
+        }
         self.render_filter_toolbar(window, cx).into_any_element()
+    }
+
+    fn render_favorite_drop_strip(&self, cx: &Context<Self>) -> Stateful<Div> {
+        let measured = self.favorite_drop_bounds.clone();
+        let hovered = self.favorite_drop_hovered;
+        let theme = cx.theme();
+        let (icon, label) = if self.history.favorite_only() {
+            (
+                IconName::HeartOff,
+                tr(
+                    self.language,
+                    "拖到这里取消收藏",
+                    "Drop to remove from favorites",
+                ),
+            )
+        } else {
+            (
+                IconName::Heart,
+                tr(self.language, "拖到这里收藏", "Drop to favorite"),
+            )
+        };
+        div()
+            .id("history-favorite-drop")
+            .relative()
+            .w_full()
+            .h(px(visual::CONTROL_HEIGHT))
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap(px(visual::SPACE_2))
+            .rounded(theme.radius)
+            .border(px(visual::BORDER_WIDTH))
+            .border_dashed()
+            .border_color(theme.ring.opacity(if hovered { 1. } else { 0.7 }))
+            .text_color(theme.accent_foreground)
+            .text_size(visual::FILTER_LABEL_SIZE)
+            .when(hovered, |target| target.bg(theme.accent))
+            .child(Icon::new(icon).size(px(visual::ICON_SIZE)))
+            .child(label)
+            .child(
+                canvas(
+                    move |bounds, _, _| measured.set(Some(bounds)),
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .inset_0(),
+            )
+            .on_drop(cx.listener(|this, drag: &HistoryDrag, window, cx| {
+                if this.external_drag.is_none() {
+                    this.drop_history_favorite_at(drag, window.mouse_position(), cx);
+                }
+            }))
     }
 
     fn render_filter_toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> Div {

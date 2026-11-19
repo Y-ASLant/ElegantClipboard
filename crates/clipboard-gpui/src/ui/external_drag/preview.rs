@@ -2,12 +2,13 @@ use super::*;
 
 pub(in crate::ui) struct DragPreview {
     pub(super) card: Option<CardDrag>,
+    pub(super) dimmed: bool,
 }
 
 impl Render for DragPreview {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         match self.card.as_ref() {
-            Some(CardDrag::History(drag)) => drag.render_card(cx),
+            Some(CardDrag::History(drag)) => drag.render_card(self.dimmed, cx),
             Some(CardDrag::Todo(drag)) => drag.render_card(window, cx),
             None => div().into_any_element(),
         }
@@ -20,16 +21,17 @@ impl ClipboardView {
         drag: &CardDrag,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Option<isize> {
+    ) -> Option<(WindowHandle<DragPreview>, isize)> {
         let card = drag.clone();
         if let Some(popup) = self.drag_preview_window
             && let Ok(hwnd) = popup.update(cx, |preview, window, cx| {
                 preview.card = Some(card.clone());
+                preview.dimmed = false;
                 cx.notify();
                 native_window::window_id(window)
             })
         {
-            return hwnd;
+            return hwnd.map(|hwnd| (popup, hwnd));
         }
         let display_id = window.display(cx).map(|display| display.id());
         let popup = cx
@@ -51,7 +53,12 @@ impl ClipboardView {
                     app_id: Some("com.aslant.ElegantClipboard.drag".into()),
                     ..Default::default()
                 },
-                move |_, cx| cx.new(|_| DragPreview { card: Some(card) }),
+                move |_, cx| {
+                    cx.new(|_| DragPreview {
+                        card: Some(card),
+                        dimmed: false,
+                    })
+                },
             )
             .ok()?;
         let hwnd = popup
@@ -59,6 +66,6 @@ impl ClipboardView {
             .ok()
             .flatten()?;
         self.drag_preview_window = Some(popup);
-        Some(hwnd)
+        Some((popup, hwnd))
     }
 }

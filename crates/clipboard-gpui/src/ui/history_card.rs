@@ -185,7 +185,12 @@ impl ClipboardView {
             window,
             cx,
         );
-        let surface = card.surface(false, cx).bg(background).border_color(border);
+        // The corner is shared with the action bar; keep the title width fixed during hover.
+        let show_pin = self.batch_mode || action_opacity == 0.;
+        let surface = card
+            .surface(false, show_pin, cx)
+            .bg(background)
+            .border_color(border);
         let measured_size = Rc::new(Cell::new(size(px(0.), px(0.))));
         let drag_enabled = !self.reorder_pending && !self.history.loading && !self.batch_mode;
         let live_drag_source = self.card_drag_active(cx) && self.drag_source_id() == Some(id);
@@ -257,6 +262,8 @@ impl ClipboardView {
                     generation: self.history.generation,
                     card,
                     size: measured_size.clone(),
+                    favorite_drop_bounds: self.favorite_drop_bounds.clone(),
+                    cursor_offset: Point::default(),
                     native_preview: false,
                 };
                 let row = row
@@ -270,6 +277,7 @@ impl ClipboardView {
                     )
                     .on_drag(drag, move |drag, offset, window, cx| {
                         let mut preview = drag.clone();
+                        preview.cursor_offset = offset;
                         entity.update(cx, |this, cx| {
                             this.close_hover_preview("card_drag_started", cx);
                             this.history.selected = Some(drag.id);
@@ -282,6 +290,7 @@ impl ClipboardView {
                                 window,
                                 cx,
                             );
+                            this.history_drag_uses_gpui = !preview.native_preview;
                             cx.notify();
                         });
                         cx.new(|_| preview)

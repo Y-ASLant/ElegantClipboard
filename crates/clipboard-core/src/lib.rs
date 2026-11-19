@@ -442,6 +442,11 @@ impl History {
         Ok(self.repo.toggle_favorite(id)?)
     }
 
+    /// 设置收藏状态；仅当状态发生变化时返回 `true`。
+    pub fn set_favorite(&self, id: i64, favorite: bool) -> Result<bool> {
+        Ok(self.repo.set_favorite(id, favorite)?)
+    }
+
     pub fn toggle_pin(&self, id: i64) -> Result<bool> {
         Ok(self.repo.toggle_pin(id)?)
     }

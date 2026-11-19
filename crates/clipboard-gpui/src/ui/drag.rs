@@ -60,6 +60,53 @@ impl ClipboardView {
                 .is_some_and(|item| item.id == drag.id && item.is_pinned == drag.pinned)
     }
 
+    pub(super) fn favorite_history_drag_active(&self, cx: &App) -> bool {
+        self.active_history_drag().is_some()
+            || (self.history_drag_uses_gpui && cx.has_active_drag())
+    }
+
+    pub(super) fn history_favorite_drop_at(
+        &self,
+        drag: &HistoryDrag,
+        pointer: Point<Pixels>,
+    ) -> bool {
+        self.favorite_drop_bounds
+            .get()
+            .is_some_and(|bounds| bounds.contains(&pointer))
+            && !self.batch_mode
+            && self.group_move_id.is_none()
+            && self.valid_drag(drag)
+    }
+
+    pub(super) fn set_favorite_drop_hovered(&mut self, hovered: bool, cx: &mut Context<Self>) {
+        if std::mem::replace(&mut self.favorite_drop_hovered, hovered) != hovered {
+            self.list_chrome.update(cx, |_, cx| cx.notify());
+        }
+    }
+
+    pub(super) fn drop_history_favorite_at(
+        &mut self,
+        drag: &HistoryDrag,
+        pointer: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.history_favorite_drop_at(drag, pointer)
+            || self.locate_progress().is_some_and(|(_, total)| total > 1)
+        {
+            return false;
+        }
+        self.favorite_drop_hovered = false;
+        self.send(
+            Command::SetFavorite {
+                id: drag.id,
+                favorite: !drag.favorite_only,
+            },
+            cx,
+        );
+        cx.notify();
+        true
+    }
+
     pub(super) fn history_drag_target(
         &mut self,
         drag: &HistoryDrag,
@@ -85,6 +132,7 @@ impl ClipboardView {
         if self.native_drag_active() {
             return;
         }
+        self.favorite_drop_hovered = false;
         self.card_drag_direction = 0;
         let target = self.drop_target.take();
         if !self.valid_drag(drag) {
@@ -143,6 +191,10 @@ impl ClipboardView {
                     .await;
                 let Ok(active) = view.update(cx, |this, cx| {
                     if !this.card_drag_active(cx) {
+                        if std::mem::take(&mut this.history_drag_uses_gpui) {
+                            this.favorite_drop_hovered = false;
+                            cx.notify();
+                        }
                         this.card_drag_direction = 0;
                         if !this.reorder_pending {
                             this.drop_target = None;

@@ -368,9 +368,6 @@ impl ClipboardView {
         if self.card_drag_active(cx) {
             cx.stop_active_drag(window);
             self.finish_external_drag(cx);
-            self.drop_target = None;
-            self.card_drag_direction = 0;
-            cx.notify();
             return;
         }
         match self.active_overlay() {

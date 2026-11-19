@@ -1,6 +1,7 @@
 mod motion;
 
 use super::*;
+use gpui_kit::component::tag::Tag;
 
 #[derive(Clone)]
 pub(super) struct HistoryCardSnapshot {
@@ -197,7 +198,7 @@ impl HistoryCardSnapshot {
         }
     }
 
-    pub(super) fn surface(&self, preview: bool, cx: &App) -> Div {
+    pub(super) fn surface(&self, preview: bool, show_pin: bool, cx: &App) -> Div {
         let media_layout = self.is_image || self.is_files;
         let spacing = visual::card_spacing(self.display.card_density);
         let padding = visual::card_padding(self.display.card_density);
@@ -236,35 +237,29 @@ impl HistoryCardSnapshot {
             .flex()
             .flex_col()
             .gap(px(spacing))
-            .child(body)
+            .child(body.when(self.is_pinned, |body| {
+                let theme = cx.theme();
+                body.child(
+                    Tag::custom(
+                        theme.accent,
+                        theme.accent_foreground,
+                        theme.ring.opacity(0.6),
+                    )
+                    .small()
+                    .rounded(theme.radius)
+                    .h(px(visual::METADATA_ROW_HEIGHT))
+                    .px(px(visual::SPACE_3 / 2.))
+                    .py(px(0.))
+                    .flex_none()
+                    .text_size(px(visual::TEXT_SMALL))
+                    .whitespace_nowrap()
+                    .when(!media_layout, |tag| tag.ml(px(visual::SPACE_2)))
+                    .when(!show_pin, |tag| tag.invisible())
+                    .child(tr(self.language, "置顶", "Pinned")),
+                )
+            }))
             .child(self.metadata_row(cx))
-            .when(self.is_pinned, |card| card.child(pin_ribbon(cx)))
     }
-}
-
-/// 置顶封条的平行斜边连接卡片上边与右边，留白等于卡片圆角。
-fn pin_ribbon(cx: &App) -> Div {
-    let inner = crate::card_radius::card_radius(cx).as_f32();
-    let outer = inner + 12.;
-    let fill = cx.theme().primary;
-    div().absolute().top_0().right_0().size(px(outer)).child(
-        canvas(
-            |_, _, _| (),
-            move |bounds, (), window, _| {
-                let corner = point(bounds.origin.x + bounds.size.width, bounds.origin.y);
-                let mut path = PathBuilder::fill();
-                path.move_to(point(corner.x - px(outer), corner.y));
-                path.line_to(point(corner.x - px(inner), corner.y));
-                path.line_to(point(corner.x, corner.y + px(inner)));
-                path.line_to(point(corner.x, corner.y + px(outer)));
-                path.close();
-                if let Ok(path) = path.build() {
-                    window.paint_path(path, fill);
-                }
-            },
-        )
-        .size_full(),
-    )
 }
 
 // 尺寸与内边距跟随源行的实测几何，原生浮窗与 GPUI 回退共用同一外壳。
@@ -283,19 +278,26 @@ impl HistoryDrag {
         self.size.get()
     }
 
-    pub(super) fn render_card(&self, cx: &App) -> AnyElement {
+    pub(super) fn overlaps_favorite_strip(&self, origin: Point<Pixels>) -> bool {
+        self.favorite_drop_bounds
+            .get()
+            .is_some_and(|strip| strip.intersects(&Bounds::new(origin, self.size())))
+    }
+
+    pub(super) fn render_card(&self, dimmed: bool, cx: &App) -> AnyElement {
         drag_card(self.size(), self.card.display.card_density, cx)
-            .child(self.card.surface(true, cx))
+            .when(dimmed, |card| card.opacity(0.2))
+            .child(self.card.surface(true, true, cx))
             .into_any_element()
     }
 }
 
 impl Render for HistoryDrag {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.native_preview {
-            div().into_any_element()
-        } else {
-            self.render_card(cx)
+            return div().into_any_element();
         }
+        let dimmed = self.overlaps_favorite_strip(window.mouse_position() - self.cursor_offset);
+        self.render_card(dimmed, cx)
     }
 }
