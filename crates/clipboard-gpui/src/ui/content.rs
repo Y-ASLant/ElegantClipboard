@@ -282,7 +282,7 @@ impl ClipboardView {
         let actions = div()
             .ml_auto()
             .flex()
-            .flex_none()
+            .min_w_0()
             .flex_wrap()
             .items_center()
             .justify_end()
@@ -324,7 +324,12 @@ impl ClipboardView {
                         );
                     })),
             );
-        let mut strip = Self::mode_chrome_strip(cx).child(exit).child(invert);
+        let mut strip = Self::mode_chrome_strip(cx)
+            .p(px(visual::SPACE_1))
+            .min_h_0()
+            .items_start()
+            .child(exit)
+            .child(invert);
         if let Some(status) = sequence_status {
             strip = strip.child(
                 div()
