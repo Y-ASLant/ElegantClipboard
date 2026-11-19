@@ -220,6 +220,7 @@ impl ClipboardView {
         };
         let button = |id, label: &'static str| {
             Button::new(id)
+                .outline()
                 .small()
                 .h(px(button_height))
                 .min_w(px(button_min_width))
@@ -227,7 +228,6 @@ impl ClipboardView {
                 .label(label)
         };
         let exit = button("batch-exit", tr(self.language, "退出", "Exit"))
-            .outline()
             .tooltip(tr(self.language, "退出多选", "Exit multi-select"))
             .disabled(self.batch_pending)
             .on_click(cx.listener(|this, _, _, cx| this.exit_batch_mode(cx)));
@@ -235,7 +235,6 @@ impl ClipboardView {
             "batch-invert-selection",
             tr(self.language, "反选", "Invert"),
         )
-        .ghost()
         .tooltip(tr(
             self.language,
             "反选当前列表勾选",
@@ -243,6 +242,7 @@ impl ClipboardView {
         ))
         .disabled(self.batch_pending || self.history.items.is_empty())
         .on_click(cx.listener(|this, _, _, cx| this.invert_batch_selection(cx)));
+        let delete_disabled = self.batch_pending || self.selected_ids.is_empty();
         let actions = div()
             .ml_auto()
             .flex()
@@ -253,7 +253,6 @@ impl ClipboardView {
             .child(
                 button("batch-merge", merge_label)
                     .flex_shrink_1()
-                    .outline()
                     .tooltip(merge_label)
                     .disabled(!can_merge_or_sequence)
                     .on_click(cx.listener(|this, _, window, cx| {
@@ -264,7 +263,6 @@ impl ClipboardView {
                 row.child(
                     button("batch-sequence", tr(self.language, "序列粘贴", "Sequence"))
                         .flex_shrink_1()
-                        .outline()
                         .tooltip(sequence_hint)
                         .disabled(!sequence_ready)
                         .on_click(cx.listener(|this, _, window, cx| {
@@ -275,7 +273,10 @@ impl ClipboardView {
             .child(
                 button("batch-delete-open", tr(self.language, "删除", "Delete"))
                     .danger()
-                    .disabled(self.batch_pending || self.selected_ids.is_empty())
+                    .when(!delete_disabled, |button| {
+                        button.text_color(cx.theme().button_foreground)
+                    })
+                    .disabled(delete_disabled)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_history_confirmation(
                             HistoryConfirmation::DeleteSelected,
