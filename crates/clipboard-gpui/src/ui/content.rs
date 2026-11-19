@@ -57,7 +57,7 @@ impl ClipboardView {
     ) -> AnyElement {
         let search = Input::new(&self.search)
             .with_size(gpui_kit::component::Size::Medium)
-            .text_size(px(visual::TEXT_BODY))
+            .text_size(visual::FILTER_LABEL_SIZE)
             .rounded(cx.theme().radius)
             .cleanable(true)
             .prefix(Icon::new(IconName::Search).size(px(visual::ICON_SIZE)))
@@ -206,7 +206,12 @@ impl ClipboardView {
         let button_height = visual::CONTROL_HEIGHT - 2. * (visual::SPACE_1 + visual::BORDER_WIDTH);
         // Keep room for both four-character labels at the minimum window width.
         let (button_min_width, button_padding) = if window.viewport_size().width < px(400.) {
-            (visual::CONTROL_HEIGHT + visual::SPACE_3, visual::SPACE_1)
+            let padding = if window.rem_size() > px(visual::TEXT_BODY) {
+                visual::SPACE_1 / 2.
+            } else {
+                visual::SPACE_1
+            };
+            (visual::CONTROL_HEIGHT + visual::SPACE_3, padding)
         } else {
             (
                 visual::CONTROL_HEIGHT + 2. * visual::SPACE_3,
@@ -219,14 +224,7 @@ impl ClipboardView {
                 .h(px(button_height))
                 .min_w(px(button_min_width))
                 .px(px(button_padding))
-                .accessibility_label(label)
-                .child(
-                    div()
-                        .min_w_0()
-                        .truncate()
-                        .text_size(px(visual::TEXT_BODY))
-                        .child(label),
-                )
+                .label(label)
         };
         let exit = button("batch-exit", tr(self.language, "退出", "Exit"))
             .outline()

@@ -271,7 +271,7 @@ impl ClipboardView {
                                                     .flex_1()
                                                     .min_w_0()
                                                     .truncate()
-                                                    .text_size(px(visual::TEXT_BODY))
+                                                    .text_size(visual::FILTER_LABEL_SIZE)
                                                     .child(option.title.clone()),
                                             ),
                                     )
