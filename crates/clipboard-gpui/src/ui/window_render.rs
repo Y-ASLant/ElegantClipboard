@@ -186,7 +186,7 @@ impl Render for ClipboardView {
             });
         }
         window_shell(cx)
-            .child(history_menu_dismiss_layer(cx))
+            .child(pointer_press_layer(cx))
             .child(
                 div()
                     .id("window-drag-handle")
@@ -214,13 +214,13 @@ impl Render for ClipboardView {
     }
 }
 
-fn history_menu_dismiss_layer(cx: &mut Context<ClipboardView>) -> impl IntoElement {
+fn pointer_press_layer(cx: &mut Context<ClipboardView>) -> impl IntoElement {
     let owner = cx.entity().downgrade();
     canvas(
         |_, _, _| {},
         move |_, _, window, _| {
             let owner = owner.clone();
-            window.on_mouse_event(move |_: &MouseDownEvent, phase, _, cx| {
+            window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
                 if phase != DispatchPhase::Capture {
                     return;
                 }
@@ -228,6 +228,13 @@ fn history_menu_dismiss_layer(cx: &mut Context<ClipboardView>) -> impl IntoEleme
                     return;
                 };
                 owner.update(cx, |this, cx| {
+                    if event.button == MouseButton::Left {
+                        // A new native press cannot belong to a drag that missed MouseUp.
+                        if this.card_drag_active(cx) {
+                            this.cancel_card_drag(window, cx);
+                        }
+                        this.drag_release_pending = false;
+                    }
                     this.close_history_menu(cx);
                 });
             });

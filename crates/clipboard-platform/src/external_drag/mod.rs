@@ -29,11 +29,11 @@ use windows::Win32::{
             GetAsyncKeyState, GetCapture, ReleaseCapture, SetCapture, VK_ESCAPE, VK_LBUTTON,
         },
         WindowsAndMessaging::{
-            GWL_EXSTYLE, GetClientRect, GetCursorPos, GetParent, GetWindowLongPtrW, GetWindowRect,
-            GetWindowThreadProcessId, HWND_TOPMOST, IsWindow, LWA_ALPHA, SWP_HIDEWINDOW,
-            SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SetLayeredWindowAttributes,
-            SetWindowLongPtrW, SetWindowPos, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-            WS_EX_TRANSPARENT, WindowFromPoint,
+            GWL_EXSTYLE, GetClientRect, GetCursorPos, GetForegroundWindow, GetParent,
+            GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId, HWND_TOPMOST, IsWindow,
+            LWA_ALPHA, SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
+            SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos, WS_EX_LAYERED,
+            WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WindowFromPoint,
         },
     },
 };
@@ -52,6 +52,40 @@ pub fn poll_drag_pointer() -> Result<DragPointerState> {
 
 pub fn drag_escape_pressed() -> bool {
     unsafe { GetAsyncKeyState(VK_ESCAPE.0 as i32) < 0 }
+}
+
+/// Windows input ownership for one held gesture, including a nonactivating source.
+pub struct DragInput {
+    source: HWND,
+    foreground: HWND,
+    captured: bool,
+}
+
+impl DragInput {
+    pub fn start(source: isize) -> Self {
+        let source = HWND(source as *mut _);
+        Self {
+            source,
+            foreground: unsafe { GetForegroundWindow() },
+            captured: unsafe { GetCapture() } == source,
+        }
+    }
+
+    pub fn interrupted(&self, pointer: DragPointerState) -> bool {
+        self.foreground_changed()
+            || (self.captured && pointer.left_button_down && unsafe { GetCapture() } != self.source)
+    }
+
+    fn foreground_changed(&self) -> bool {
+        self.foreground != unsafe { GetForegroundWindow() }
+    }
+
+    /// Release only the old source's capture, after returning from GPUI callbacks.
+    pub fn release_capture(&self) {
+        if unsafe { GetCapture() } == self.source {
+            let _ = unsafe { ReleaseCapture() };
+        }
+    }
 }
 
 /// Convert physical screen coordinates to GPUI logical client coordinates.
@@ -292,6 +326,7 @@ impl Drop for OleGuard {
 pub fn run_external_drag(
     payload: PreparedExternalDrag,
     options: ExternalDragOptions,
+    input: &DragInput,
 ) -> Result<ExternalDragOutcome> {
     validate_window_thread(options.source_window)?;
     let _ole = OleGuard::initialize()?;
@@ -300,7 +335,7 @@ pub fn run_external_drag(
     }
     let pointer = poll_drag_pointer()?;
     let rect = source_rect(options.source_window)?;
-    if drag_escape_pressed() {
+    if drag_escape_pressed() || input.interrupted(pointer) {
         return Ok(ExternalDragOutcome::Cancelled);
     }
     if !pointer.left_button_down {
@@ -315,6 +350,7 @@ pub fn run_external_drag(
     let failed = Rc::new(Cell::new(false));
     let data = data_object::data_object(payload.clone());
     let source: IDropSource = source::DragSource {
+        foreground: input.foreground,
         rect,
         has_left: Cell::new(!contains(rect, pointer)),
         returned: returned.clone(),
@@ -330,6 +366,9 @@ pub fn run_external_drag(
     }
     let mut effect = DROPEFFECT_NONE;
     let result = unsafe { DoDragDrop(&data, &source, DROPEFFECT_COPY, &mut effect) };
+    if returned.get().is_some() && input.foreground_changed() {
+        return Ok(ExternalDragOutcome::Cancelled);
+    }
     if returned.get() == Some(ExternalDragOutcome::ReturnedToSource)
         && had_capture
         && poll_drag_pointer().is_ok_and(|p| p.left_button_down)

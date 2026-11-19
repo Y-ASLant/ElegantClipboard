@@ -10,18 +10,20 @@ use std::{
 use windows::{
     Win32::{
         Foundation::{
-            DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, DRAGDROP_S_USEDEFAULTCURSORS, RECT, S_OK,
+            DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, DRAGDROP_S_USEDEFAULTCURSORS, HWND, RECT, S_OK,
         },
         System::{
             Ole::{DROPEFFECT, IDropSource, IDropSource_Impl},
             SystemServices::{MK_LBUTTON, MODIFIERKEYS_FLAGS},
         },
+        UI::WindowsAndMessaging::GetForegroundWindow,
     },
     core::{BOOL, HRESULT, implement},
 };
 
 #[implement(IDropSource)]
 pub(super) struct DragSource {
+    pub foreground: HWND,
     pub rect: RECT,
     pub has_left: Cell<bool>,
     pub returned: Rc<Cell<Option<ExternalDragOutcome>>>,
@@ -80,7 +82,10 @@ impl DragSource {
 
 impl IDropSource_Impl for DragSource_Impl {
     fn QueryContinueDrag(&self, escape: BOOL, keys: MODIFIERKEYS_FLAGS) -> HRESULT {
-        if escape.as_bool() || self.failed.get() {
+        if escape.as_bool()
+            || self.failed.get()
+            || self.foreground != unsafe { GetForegroundWindow() }
+        {
             return DRAGDROP_S_CANCEL;
         }
         let Ok(mut pointer) = poll_drag_pointer() else {

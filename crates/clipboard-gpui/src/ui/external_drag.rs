@@ -183,6 +183,8 @@ impl ClipboardView {
         let Some(source) = native_window::window_id(window) else {
             return false;
         };
+        #[cfg(windows)]
+        let input = native::DragInput::start(source);
         let dimensions = drag.size();
         if dimensions.width <= px(0.) || dimensions.height <= px(0.) {
             return false;
@@ -264,10 +266,15 @@ impl ClipboardView {
                     let session = this.external_drag.as_ref().filter(|session| session.token == token)?;
                     let source = session.source_hwnd;
                     let drag = session.drag.clone();
+                    #[cfg(windows)]
+                    if input.interrupted(pointer) {
+                        this.cancel_card_drag(window, cx);
+                        return None;
+                    }
                     // A focused panel handles Escape through DismissOrHide. Polling
                     // too could cancel first and then let the same key hide the panel.
                     if !window.is_window_active() && native::drag_escape_pressed() {
-                        this.finish_external_drag(cx);
+                        this.cancel_card_drag(window, cx);
                         return None;
                     }
                     if !drag.valid(this, cx) {
@@ -341,8 +348,10 @@ impl ClipboardView {
                     let result = cx.background_executor().spawn(async move {
                         native::run_external_drag(payload, options)
                     }).await;
-                    #[cfg(not(target_os = "linux"))]
+                    #[cfg(target_os = "macos")]
                     let result = native::run_external_drag(payload, options);
+                    #[cfg(windows)]
+                    let result = native::run_external_drag(payload, options, &input);
                     let keep = update_clipboard_window(&view, main, cx, |this, window, cx| {
                         let Some(session) = this.external_drag.as_mut().filter(|session| session.token == token) else { return false; };
                         session.native_active = false;
@@ -364,7 +373,8 @@ impl ClipboardView {
                                 }
                                 false
                             }
-                            Ok(_) => { this.finish_external_drag(cx); false }
+                            Ok(ExternalDragOutcome::Cancelled) => { this.cancel_card_drag(window, cx); false }
+                            Ok(ExternalDragOutcome::Dropped) => { this.finish_external_drag(cx); false }
                             Err(error) => { this.fail_card_drag(format!("{error:#}"), cx); false }
                         }
                     }).unwrap_or(false);
@@ -390,12 +400,16 @@ impl ClipboardView {
                     } else { Poll::Pending }
                 }).await;
             }
-            let may_hide = view.update(cx, |this, cx| {
-                if this.external_drag.as_ref().is_some_and(|session| session.token != token) { return false; }
+            let cleanup = view.update(cx, |this, cx| {
+                if this.external_drag.as_ref().is_some_and(|session| session.token != token) { return None; }
                 if this.external_drag.is_some() { this.finish_external_drag(cx); }
-                true
-            }).unwrap_or(false);
-            if may_hide { let _ = native::hide_drag_preview(preview_hwnd); }
+                Some(this.drag_token == token && this.drag_release_pending)
+            });
+            if let Ok(Some(_release_capture)) = cleanup {
+                #[cfg(windows)]
+                if _release_capture { input.release_capture(); }
+                let _ = native::hide_drag_preview(preview_hwnd);
+            }
         }).detach();
         true
     }
@@ -462,6 +476,13 @@ impl ClipboardView {
     fn fail_card_drag(&mut self, error: String, cx: &mut Context<Self>) {
         self.set_feedback_message(error);
         self.is_error = true;
+        self.finish_external_drag(cx);
+    }
+
+    pub(super) fn cancel_card_drag(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        cx.stop_active_drag(window);
+        window.release_pointer();
+        self.drag_release_pending = true;
         self.finish_external_drag(cx);
     }
 

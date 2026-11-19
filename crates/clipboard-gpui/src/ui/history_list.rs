@@ -18,12 +18,6 @@ impl ClipboardView {
                 .absolute()
                 .size_full(),
             )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, _, _| {
-                    this.drag_release_pending = false;
-                }),
-            )
             .key_context("HistoryList")
             .track_focus(&self.list_focus)
             .flex_1()

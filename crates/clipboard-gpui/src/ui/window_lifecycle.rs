@@ -366,8 +366,7 @@ impl ClipboardView {
         }
         self.close_hover_preview("dismiss", cx);
         if self.card_drag_active(cx) {
-            cx.stop_active_drag(window);
-            self.finish_external_drag(cx);
+            self.cancel_card_drag(window, cx);
             return;
         }
         match self.active_overlay() {
