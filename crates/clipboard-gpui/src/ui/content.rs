@@ -261,15 +261,14 @@ impl ClipboardView {
                 format!("剩 {remaining} · {}", self.sequence_hotkey)
             }
         });
-        let exit = Button::new("batch-exit")
-            .small()
+        let button = |id| Button::new(id).small().px(px(visual::SPACE_1));
+        let exit = button("batch-exit")
             .outline()
             .label(tr(self.language, "退出", "Exit"))
             .tooltip(tr(self.language, "退出多选", "Exit multi-select"))
             .disabled(self.batch_pending)
             .on_click(cx.listener(|this, _, _, cx| this.exit_batch_mode(cx)));
-        let invert = Button::new("batch-invert-selection")
-            .small()
+        let invert = button("batch-invert-selection")
             .ghost()
             .label(tr(self.language, "反选", "Invert"))
             .tooltip(tr(
@@ -283,15 +282,16 @@ impl ClipboardView {
             .ml_auto()
             .flex()
             .min_w_0()
-            .flex_wrap()
             .items_center()
             .justify_end()
-            .gap(px(visual::SPACE_2))
+            .gap(px(visual::SPACE_1))
             .child(
-                Button::new("batch-merge")
-                    .small()
+                button("batch-merge")
+                    .flex_shrink_1()
+                    .min_w_0()
                     .outline()
                     .label(merge_label)
+                    .tooltip(merge_label)
                     .disabled(!can_merge_or_sequence)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.merge_selected(window, cx);
@@ -299,8 +299,9 @@ impl ClipboardView {
             )
             .when(sequence_status.is_none(), |row| {
                 row.child(
-                    Button::new("batch-sequence")
-                        .small()
+                    button("batch-sequence")
+                        .flex_shrink_1()
+                        .min_w_0()
                         .outline()
                         .label(tr(self.language, "序列粘贴", "Sequence"))
                         .tooltip(sequence_hint)
@@ -311,8 +312,7 @@ impl ClipboardView {
                 )
             })
             .child(
-                Button::new("batch-delete-open")
-                    .small()
+                button("batch-delete-open")
                     .danger()
                     .label(tr(self.language, "删除", "Delete"))
                     .disabled(self.batch_pending || self.selected_ids.is_empty())
@@ -327,7 +327,7 @@ impl ClipboardView {
         let mut strip = Self::mode_chrome_strip(cx)
             .p(px(visual::SPACE_1))
             .min_h_0()
-            .items_start()
+            .gap(px(visual::SPACE_1))
             .child(exit)
             .child(invert);
         if let Some(status) = sequence_status {
@@ -335,7 +335,7 @@ impl ClipboardView {
                 div()
                     .flex_1()
                     .min_w_0()
-                    .px(px(visual::SPACE_2))
+                    .truncate()
                     .text_size(px(visual::TEXT_SMALL))
                     .text_color(cx.theme().muted_foreground)
                     .child(status),
