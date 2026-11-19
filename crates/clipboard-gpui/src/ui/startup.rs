@@ -138,7 +138,6 @@ pub fn run(
                 KeyBinding::new("end", Last, Some("HistoryList")),
                 KeyBinding::new("pageup", PageUp, Some("HistoryList")),
                 KeyBinding::new("pagedown", PageDown, Some("HistoryList")),
-                KeyBinding::new("ctrl-a", SelectAllLoaded, Some("HistoryList")),
                 KeyBinding::new("enter", ActivateSelected, Some("HistoryList")),
                 KeyBinding::new("shift-enter", PastePlainTextSelected, Some("HistoryList")),
                 KeyBinding::new("ctrl-enter", PasteSelected, Some("HistoryList")),
@@ -156,7 +155,6 @@ pub fn run(
             cx.bind_keys([
                 KeyBinding::new("cmd-left", PreviousGroup, Some("HistoryList")),
                 KeyBinding::new("cmd-right", NextGroup, Some("HistoryList")),
-                KeyBinding::new("cmd-a", SelectAllLoaded, Some("HistoryList")),
                 KeyBinding::new("cmd-enter", PasteSelected, Some("HistoryList")),
                 KeyBinding::new("cmd-f", FocusSearch, Some("ClipboardApp")),
             ]);

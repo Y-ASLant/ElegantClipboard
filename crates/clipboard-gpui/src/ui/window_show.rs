@@ -123,6 +123,7 @@ impl ClipboardView {
                 self.search
                     .update(cx, |input, cx| input.set_value("", window, cx));
                 self.release_history_drag(cx);
+                self.located = None;
                 let reload = self.history.begin_search();
                 self.scroll_to_top();
                 self.arm_history_query(reload, false, cx);

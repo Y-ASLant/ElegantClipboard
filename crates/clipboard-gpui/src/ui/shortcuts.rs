@@ -108,6 +108,26 @@ impl ClipboardView {
         }
     }
 
+    /// 进入多选快捷键：窗口内生效，不走全局注册，按普通偏好确认流保存。
+    pub(super) fn select_batch_hotkey(&mut self, shortcut: String, cx: &mut Context<Self>) {
+        match normalize_paste_shortcut(&shortcut) {
+            Ok(shortcut) => {
+                self.save_pending(
+                    |this| &mut this.batch_hotkey,
+                    true,
+                    shortcut,
+                    Command::SetBatchHotkey,
+                    cx,
+                );
+            }
+            Err(error) => {
+                self.set_feedback_message(error.to_string());
+                self.is_error = true;
+                cx.notify();
+            }
+        }
+    }
+
     pub(super) fn select_quick_paste_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         if !self.monitoring {
             return;

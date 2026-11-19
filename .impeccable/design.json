@@ -1,0 +1,262 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-18T15:51:02Z",
+  "title": "Design System: ElegantClipboard",
+  "extensions": {
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "鸭青 Cyan",
+        "canonical": "#1a7770",
+        "tonalRamp": ["#0f2f2c", "#18524e", "#1a7770", "#3a9a92", "#6d9591", "#9bc8c3", "#e3f0ee", "#f4faf9"]
+      },
+      "primary-hover": {
+        "role": "primary",
+        "displayName": "鸭青 Hover",
+        "canonical": "#17625c",
+        "tonalRamp": ["#0f2f2c", "#18524e", "#17625c", "#1a7770", "#3a9a92", "#9bc8c3", "#e3f0ee", "#f4faf9"]
+      },
+      "ring": {
+        "role": "primary",
+        "displayName": "Selection Ring",
+        "canonical": "#6d9591",
+        "tonalRamp": ["#1c3330", "#3a5c58", "#6d9591", "#9bc8c3", "#c5dedb", "#e3f0ee", "#f0f7f6", "#f8fbfb"]
+      },
+      "accent-blue": {
+        "role": "secondary",
+        "displayName": "Google Blue (alternate)",
+        "canonical": "#185abc",
+        "tonalRamp": ["#143e78", "#164e96", "#185abc", "#3b82d6", "#8ab4f8", "#b8d3fb", "#e8f0fe", "#f5f9ff"]
+      },
+      "accent-orange": {
+        "role": "secondary",
+        "displayName": "Vibrant Orange (alternate)",
+        "canonical": "#c2410c",
+        "tonalRamp": ["#7c2d12", "#9a3412", "#c2410c", "#ea580c", "#fb923c", "#fdba74", "#ffedd5", "#fff7ed"]
+      },
+      "accent-rouge": {
+        "role": "secondary",
+        "displayName": "胭脂 Rouge (alternate)",
+        "canonical": "#9d2933",
+        "tonalRamp": ["#741721", "#8d1726", "#9d2933", "#c44b52", "#ea9796", "#e6b7b5", "#fee4e3", "#fff5f5"]
+      },
+      "surface-light": {
+        "role": "neutral",
+        "displayName": "Solid Surface Light",
+        "canonical": "#ffffff",
+        "tonalRamp": ["#18181b", "#52525b", "#a1a1aa", "#d4d4d8", "#e4e4e7", "#f4f4f5", "#fafafa", "#ffffff"]
+      },
+      "surface-dark": {
+        "role": "neutral",
+        "displayName": "Solid Surface Dark",
+        "canonical": "#22252b",
+        "tonalRamp": ["#15171b", "#1b1e23", "#22252b", "#2d3138", "#3a4049", "#515b69", "#b5becb", "#f1f3f5"]
+      },
+      "foreground-light": {
+        "role": "neutral",
+        "displayName": "Ink Light",
+        "canonical": "#18181b",
+        "tonalRamp": ["#09090b", "#18181b", "#27272a", "#52525b", "#71717a", "#a1a1aa", "#e4e4e7", "#fafafa"]
+      },
+      "border-light": {
+        "role": "neutral",
+        "displayName": "Hairline Light",
+        "canonical": "#e4e4e7",
+        "tonalRamp": ["#3f3f46", "#71717a", "#a1a1aa", "#d4d4d8", "#e4e4e7", "#f4f4f5", "#fafafa", "#ffffff"]
+      },
+      "danger": {
+        "role": "primary",
+        "displayName": "Danger",
+        "canonical": "#dc2626",
+        "tonalRamp": ["#7f1d1d", "#991b1b", "#b91c1c", "#dc2626", "#f87171", "#fecaca", "#fef2f2", "#fff5f5"]
+      },
+      "success": {
+        "role": "primary",
+        "displayName": "Success",
+        "canonical": "#16a34a",
+        "tonalRamp": ["#14532d", "#166534", "#15803d", "#16a34a", "#4ade80", "#bbf7d0", "#f0fdf4", "#f7fef9"]
+      },
+      "warning": {
+        "role": "primary",
+        "displayName": "Warning",
+        "canonical": "#b45309",
+        "tonalRamp": ["#78350f", "#92400e", "#b45309", "#d97706", "#fbbf24", "#fde68a", "#fffbeb", "#fffdf5"]
+      }
+    },
+    "typographyMeta": {
+      "title": { "displayName": "Title", "purpose": "Dialog titles, section emphasis, dense headings." },
+      "dialog": { "displayName": "Dialog body", "purpose": "Confirm copy and short form prose." },
+      "body": { "displayName": "Body", "purpose": "Default UI, cards, settings labels, list text." },
+      "label": { "displayName": "Label / small", "purpose": "Metadata, captions, settings descriptions." }
+    },
+    "shadows": [
+      {
+        "name": "popover",
+        "value": "0 2px 12px rgba(0,0,0,0.20)",
+        "purpose": "Floating menus, action bars, hover chrome separation."
+      },
+      {
+        "name": "control",
+        "value": "0 1px 3px rgba(0,0,0,0.12)",
+        "purpose": "Light lift on small elevated controls (e.g. return-to-top)."
+      }
+    ],
+    "motion": [
+      {
+        "name": "fast",
+        "value": "150ms",
+        "purpose": "Color/opacity state (hover, action-bar fade); scrollbar enter."
+      },
+      {
+        "name": "normal",
+        "value": "200ms",
+        "purpose": "Panel/step/preview entrance ease-out; scrollbar exit."
+      },
+      {
+        "name": "slow",
+        "value": "300ms",
+        "purpose": "Drag settle, return-to-top ease-out, spring move."
+      },
+      {
+        "name": "preview-reveal",
+        "value": "190ms",
+        "purpose": "Hover preview appearance."
+      },
+      {
+        "name": "ease-out",
+        "value": "cubic-bezier(0, 0, 0.58, 1)",
+        "purpose": "Chakra enter curve."
+      },
+      {
+        "name": "ease-in",
+        "value": "cubic-bezier(0.42, 0, 1, 1)",
+        "purpose": "Chakra exit curve."
+      },
+      {
+        "name": "ease-in-out",
+        "value": "cubic-bezier(0.42, 0, 0.58, 1)",
+        "purpose": "Chakra move curve; drag displacement."
+      },
+      {
+        "name": "scrollbar-idle",
+        "value": "900ms",
+        "purpose": "Scrolling-mode thumb idle before fade."
+      },
+      {
+        "name": "scrollbar-expand",
+        "value": "180ms",
+        "purpose": "Thumb width expand on hover/active."
+      }
+    ],
+    "breakpoints": []
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Accent fill action; 36px large height for primary settings/dialog actions.",
+      "html": "<button class=\"ds-btn-primary\" type=\"button\">保存</button>",
+      "css": ".ds-btn-primary { background: #1a7770; color: #fff; height: 36px; padding: 0 16px; border: none; border-radius: 8px; font: 400 14px \"Microsoft YaHei UI\", system-ui, sans-serif; cursor: pointer; transition: background 150ms cubic-bezier(0,0,0.58,1); } .ds-btn-primary:hover { background: #17625c; } .ds-btn-primary:active { background: #18524e; } .ds-btn-primary:focus-visible { outline: 1px solid #6d9591; outline-offset: 2px; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Muted neutral action for cancel and secondary tools.",
+      "html": "<button class=\"ds-btn-secondary\" type=\"button\">取消</button>",
+      "css": ".ds-btn-secondary { background: #f4f4f5; color: #18181b; height: 32px; padding: 0 12px; border: 1px solid #e4e4e7; border-radius: 8px; font: 400 14px \"Microsoft YaHei UI\", system-ui, sans-serif; cursor: pointer; transition: background 150ms cubic-bezier(0,0,0.58,1); } .ds-btn-secondary:hover { background: #e4e4e7; } .ds-btn-secondary:active { background: #d4d4d8; } .ds-btn-secondary:focus-visible { outline: 1px solid #6d9591; outline-offset: 2px; }"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Destructive confirms (clear history, delete group).",
+      "html": "<button class=\"ds-btn-danger\" type=\"button\">删除全部历史</button>",
+      "css": ".ds-btn-danger { background: #b91c1c; color: #fff; height: 36px; padding: 0 16px; border: none; border-radius: 8px; font: 400 14px \"Microsoft YaHei UI\", system-ui, sans-serif; cursor: pointer; transition: background 150ms cubic-bezier(0,0,0.58,1); } .ds-btn-danger:hover { background: #991b1b; } .ds-btn-danger:active { background: #7f1d1d; } .ds-btn-danger:focus-visible { outline: 1px solid #dc2626; outline-offset: 2px; }"
+    },
+    {
+      "name": "Search Input",
+      "kind": "input",
+      "refersTo": "search-input",
+      "description": "Main window search; Medium 32px, 14px type, full row width.",
+      "html": "<input class=\"ds-input-search\" type=\"search\" placeholder=\"搜索历史…\" />",
+      "css": ".ds-input-search { box-sizing: border-box; width: 100%; height: 32px; padding: 0 12px; background: #d4d4d8; color: #18181b; border: 1px solid #e4e4e7; border-radius: 8px; font: 400 14px \"Microsoft YaHei UI\", system-ui, sans-serif; outline: none; transition: border-color 150ms cubic-bezier(0,0,0.58,1), background 150ms cubic-bezier(0,0,0.58,1); } .ds-input-search::placeholder { color: #52525b; } .ds-input-search:hover { background: #e4e4e7; } .ds-input-search:focus, .ds-input-search:focus-visible { border-color: #6d9591; background: #fff; box-shadow: none; }"
+    },
+    {
+      "name": "History Card",
+      "kind": "card",
+      "refersTo": "history-card",
+      "description": "Variable-height list row; metadata whisper; selection wash + ring.",
+      "html": "<article class=\"ds-card-history\" data-selected=\"false\"><div class=\"ds-card-history__body\">npm install gpui-kit</div><footer class=\"ds-card-history__meta\"><span>2 分钟前</span><span>24 B</span><span>WindowsTerminal</span></footer></article>",
+      "css": ".ds-card-history { background: #fff; color: #18181b; border: 1px solid #e4e4e7; border-radius: 8px; padding: 10px; font: 400 14px/1.6 \"Microsoft YaHei UI\", system-ui, sans-serif; transition: background 150ms cubic-bezier(0,0,0.58,1), border-color 150ms cubic-bezier(0,0,0.58,1); } .ds-card-history:hover, .ds-card-history[data-selected=\"true\"] { background: rgba(26,119,112,0.12); border-color: #6d9591; } .ds-card-history__body { min-height: 44.8px; } .ds-card-history__meta { display: flex; gap: 8px; margin-top: 8px; height: 20px; align-items: center; color: #52525b; font-size: 12px; }"
+    },
+    {
+      "name": "Segmented Tab",
+      "kind": "chip",
+      "refersTo": "tab-segment",
+      "description": "Category / settings mutually exclusive Filling Space tabs.",
+      "html": "<div class=\"ds-tabs\" role=\"tablist\"><button class=\"ds-tab\" type=\"button\">全部</button><button class=\"ds-tab ds-tab--active\" type=\"button\" aria-selected=\"true\">收藏</button><button class=\"ds-tab\" type=\"button\">其他</button></div>",
+      "css": ".ds-tabs { display: flex; gap: 0; height: 32px; padding: 4px; background: #f4f4f5; border-radius: 8px; } .ds-tab { flex: 1; border: none; background: transparent; color: #52525b; border-radius: 6px; font: 400 14px \"Microsoft YaHei UI\", system-ui, sans-serif; cursor: pointer; transition: background 150ms cubic-bezier(0,0,0.58,1), color 150ms cubic-bezier(0,0,0.58,1); } .ds-tab:hover { color: #18181b; } .ds-tab--active { background: #fff; color: #1a7770; box-shadow: 0 1px 3px rgba(0,0,0,0.12); } .ds-tab:focus-visible { outline: 1px solid #6d9591; outline-offset: 1px; }"
+    },
+    {
+      "name": "Dialog Shell",
+      "kind": "card",
+      "refersTo": "dialog-shell",
+      "description": "Solid popover surface dialog; default 448px.",
+      "html": "<div class=\"ds-dialog\" role=\"dialog\" aria-labelledby=\"ds-dialog-title\"><h2 id=\"ds-dialog-title\" class=\"ds-dialog__title\">清理历史</h2><p class=\"ds-dialog__body\">将删除当前分组中未置顶且未收藏的记录。</p><footer class=\"ds-dialog__footer\"><button class=\"ds-btn-secondary\" type=\"button\">取消</button><button class=\"ds-btn-danger\" type=\"button\">清理</button></footer></div>",
+      "css": ".ds-dialog { width: 448px; max-width: 100%; background: #fff; color: #18181b; border: 1px solid #e4e4e7; border-radius: 8px; padding: 16px; box-shadow: 0 2px 12px rgba(0,0,0,0.20); font: 400 14px/1.6 \"Microsoft YaHei UI\", system-ui, sans-serif; } .ds-dialog__title { margin: 0 0 8px; font-size: 18px; font-weight: 600; line-height: 1.3; } .ds-dialog__body { margin: 0 0 16px; font-size: 16px; color: #52525b; } .ds-dialog__footer { display: flex; justify-content: flex-end; gap: 8px; } .ds-btn-secondary { background: #f4f4f5; color: #18181b; height: 32px; padding: 0 12px; border: 1px solid #e4e4e7; border-radius: 8px; font: 400 14px \"Microsoft YaHei UI\", system-ui, sans-serif; cursor: pointer; } .ds-btn-secondary:hover { background: #e4e4e7; } .ds-btn-danger { background: #b91c1c; color: #fff; height: 36px; padding: 0 16px; border: none; border-radius: 8px; font: 400 14px \"Microsoft YaHei UI\", system-ui, sans-serif; cursor: pointer; } .ds-btn-danger:hover { background: #991b1b; }"
+    },
+    {
+      "name": "Main window chrome",
+      "kind": "custom",
+      "refersTo": "history-card",
+      "description": "Borderless shell sketch: grip, search, tabs, status — not a web title bar.",
+      "html": "<div class=\"ds-shell\"><div class=\"ds-shell__grip\" aria-hidden=\"true\"></div><input class=\"ds-input-search\" type=\"search\" placeholder=\"搜索历史…\" /><div class=\"ds-tabs\" style=\"margin-top:8px\"><button class=\"ds-tab ds-tab--active\" type=\"button\">全部</button><button class=\"ds-tab\" type=\"button\">收藏</button><button class=\"ds-tab\" type=\"button\">其他</button></div><div class=\"ds-shell__status\">128 条</div></div>",
+      "css": ".ds-shell { width: 360px; padding: 12px; background: #fafafa; color: #18181b; border: 1px solid #e4e4e7; border-radius: 12px; font: 400 14px \"Microsoft YaHei UI\", system-ui, sans-serif; } .ds-shell__grip { width: 36px; height: 4px; margin: 0 auto 10px; border-radius: 2px; background: #d4d4d8; } .ds-input-search { box-sizing: border-box; width: 100%; height: 32px; padding: 0 12px; background: #d4d4d8; color: #18181b; border: 1px solid #e4e4e7; border-radius: 8px; font: inherit; } .ds-tabs { display: flex; height: 32px; padding: 4px; background: #f4f4f5; border-radius: 8px; } .ds-tab { flex: 1; border: none; background: transparent; color: #52525b; border-radius: 6px; font: inherit; cursor: pointer; } .ds-tab--active { background: #fff; color: #1a7770; box-shadow: 0 1px 3px rgba(0,0,0,0.12); } .ds-shell__status { margin-top: 12px; height: 28px; display: flex; align-items: center; color: #52525b; font-size: 12px; border-top: 1px solid #e4e4e7; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Quiet Instrument",
+    "overview": "ElegantClipboard’s UI is a precision desktop instrument: summoned, scanned, dismissed. Personality is restrained, slightly soft, and native-feeling — never loud. Density is high but orderly: history cards, metadata, and controls pack information without marketing chrome or decorative glass stacks.\n\nThe visual system is Chakra-inspired semantics projected onto GPUI Kit: one accent voice, cool zinc neutrals, light/dark parity, and optional OS materials (frosted / mica / opaque). Motion is short and state-bearing (150 / 200 / 300 ms Chakra curves). Global theme.shadow and theme.focus_ring stay off; depth and focus come from tonal fills, hairlines, and Kit’s thin control outlines.\n\nConfirmed rejections: marketing hero/illustration bands; neon glassmorphism or heavy shadow piles; thick custom focus rings; browser-chrome metaphors (address bar / multi-tab app shell).",
+    "keyCharacteristics": [
+      "Operate-mode density over expression",
+      "GPUI Kit catalog controls only for catalog interactions",
+      "Material shell vs solid popover split",
+      "One accent family at a time (default 鸭青); neutrals stay zinc",
+      "Motion respects OS reduce-motion; feedback stays legible without spectacle"
+    ],
+    "rules": [
+      { "name": "The One Accent Rule", "body": "Only the active accent palette may color interactive emphasis (primary, selection, links, rings). Neutrals never compete with a second brand hue on the same screen.", "section": "colors" },
+      { "name": "The Popover Is Solid Rule", "body": "Dialogs, menus, notifications, floating action bars, and hover reading chrome use opaque popover/surface. Translucency belongs to the window shell and shared list wash — not to every floating layer.", "section": "colors" },
+      { "name": "The Hairline Rule", "body": "Under materials, shared separators use ~55% border alpha so they read as tonal cuts across the backdrop; controls that need a hard edge use emphasized/input, not a second border color family.", "section": "colors" },
+      { "name": "The No Display Face Rule", "body": "Do not introduce a decorative display font for chrome. Hierarchy is size and weight only inside the system UI family.", "section": "typography" },
+      { "name": "The Metadata Whisper Rule", "body": "Time, size, and source stay on secondary text at small size; they never steal accent color except when the row is selected.", "section": "typography" },
+      { "name": "The Twelve-Pixel Gutter Rule", "body": "Content left/right inset stays 12px unless a surface documents an exception (e.g. dialog internal padding).", "section": "layout" },
+      { "name": "The Virtual List Rule", "body": "Long history never switches to paginated page chrome; height virtualization is the density strategy.", "section": "layout" },
+      { "name": "The Flat-By-Default Rule", "body": "Cards and list rows do not carry drop shadows at rest. Selection is accent wash + ring stroke, not elevation.", "section": "elevation" },
+      { "name": "The Shell vs Chrome Rule", "body": "Translucency is a window-material choice. Floating decision UI stays solid for legibility and shadow honesty.", "section": "elevation" },
+      { "name": "The Radius Is a Preference Rule", "body": "Do not hard-code a one-off radius fashion per feature; read the theme radius tokens.", "section": "shapes" },
+      { "name": "The Window Chrome Is Native Rule", "body": "App-drawn radii stop at controls and content; system window shape stays system.", "section": "shapes" }
+    ],
+    "dos": [
+      "Do use GPUI Kit catalog components for buttons, inputs, dialogs, tabs, switches, checkboxes, settings chrome, notifications, virtual lists, and Kbd.",
+      "Do read colors from theme semantic tokens after design_system::apply — never local light/dark hex tables in features.",
+      "Do keep main-window chrome borderless with the grip + status bar pattern; settings may use Kit TitleBar.",
+      "Do honor reduce-motion: cut spatial travel, keep opacity/color state changes that encode feedback.",
+      "Do keep popovers/menus/dialogs on solid surfaces; put materials on the shell.",
+      "Do match pointer hover and keyboard focus to the same selected row model.",
+      "Do stay within the spacing scale (4–24) and control heights (28 / 32 / 36)."
+    ],
+    "donts": [
+      "Don't add a second component library or hand-roll a Kit equivalent control.",
+      "Don't enable thick global focus rings or decorative multi-stop neon gradients.",
+      "Don't put marketing heroes, illustrative empty-state mascots, or web app tab-strip chrome into the utility shell.",
+      "Don't silently degrade rich clipboard formats in UI copy affordances; errors for missing formats stay explicit.",
+      "Don't paint nested panels with independent glass stacks that fight DWM/AppKit blur.",
+      "Don't invent a display typeface or a second accent on the same view.",
+      "Don't use shadows on resting list cards to fake hierarchy — use density, type, and selection wash.",
+      "Don't claim iOS HIG / Material 3 mobile patterns; this system is desktop GPUI despite adaptive product platform tagging."
+    ]
+  }
+}

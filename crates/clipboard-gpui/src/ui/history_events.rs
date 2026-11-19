@@ -318,6 +318,7 @@ impl ClipboardView {
             self.feedback_pending = false;
         }
         self.reconcile_history_rows(cx);
+        self.finish_locate();
         true
     }
 

@@ -24,6 +24,8 @@ pub struct PreferenceSnapshot {
     pub dedup_strategy: DedupStrategy,
     pub restore_clipboard: bool,
     pub sequence_hotkey: String,
+    /// 进入多选快捷键；空串停用。
+    pub batch_hotkey: String,
     pub quick_paste_enabled: bool,
     pub paste_delivery_mode: PasteDeliveryMode,
     pub paste_shortcuts: PasteShortcutConfig,
@@ -67,6 +69,7 @@ impl Preferences {
             dedup_strategy: self.dedup_strategy()?,
             restore_clipboard: self.restore_clipboard()?,
             sequence_hotkey: self.sequence_paste_hotkey()?,
+            batch_hotkey: self.batch_mode_hotkey()?,
             quick_paste_enabled: self.quick_paste_enabled()?,
             paste_delivery_mode: self.paste_delivery_mode()?,
             paste_shortcuts: self.paste_shortcuts()?,

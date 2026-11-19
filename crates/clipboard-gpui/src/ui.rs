@@ -107,7 +107,7 @@ use crate::native::{
     window as native_window,
 };
 use crate::tray::{self, TrayCommand};
-use crate::visual::{self, GROUP_BAR_HEIGHT, PAGE_PADDING};
+use crate::visual::{self, PAGE_PADDING};
 use crate::window_effect;
 use crate::{
     options::Options,
@@ -181,7 +181,6 @@ gpui_kit::actions!(
         Last,
         PageUp,
         PageDown,
-        SelectAllLoaded,
         ActivateSelected,
         PastePlainTextSelected,
         PasteSelected,
@@ -256,6 +255,10 @@ enum HistoryMenuAction {
     ToggleFavorite,
     TogglePin,
     MoveToGroup,
+    /// 进入多选并勾选本条（非整表全选）。
+    Select,
+    /// 清空搜索与分类筛选，回到完整列表并定位到该条目。
+    Locate,
     Delete,
 }
 
@@ -332,6 +335,12 @@ struct ClipboardView {
     confirmation_error: Option<String>,
     group_move_id: Option<i64>,
     group_move_pending: bool,
+    /// 「定位到时间线」等待重新加载的条目；列表返回后滚动到它。
+    locate_id: Option<i64>,
+    /// 已定位的条目：卡片保持标记，搜索框文字保留但暂不参与筛选。
+    located: Option<i64>,
+    /// 定位时筛选结果里的全部条目，供「上一个/下一个」在时间线中跳转。
+    located_matches: HashSet<i64>,
     editor: PreviewState,
     /// 正文编辑的独立窗口。备注仍用主窗口对话框。
     editor_window: Option<AnyWindowHandle>,
@@ -441,6 +450,8 @@ struct ClipboardView {
     paste_state: paste_coordinator::PasteCoordinator,
     paste_delivery_task: Option<Task<()>>,
     sequence_hotkey: String,
+    /// 多选切换快捷键；空串停用。
+    batch_hotkey: PendingPref<String>,
     sequence_hotkey_pending: bool,
     reorder_pending: bool,
     drop_target: Option<DropTarget>,
@@ -497,6 +508,8 @@ enum ShortcutTarget {
     Paste(bool, u8),
     /// 序列粘贴推进键（决策 0004）。
     Sequence,
+    /// 多选切换快捷键。
+    BatchMode,
 }
 
 struct SettingsWindowView {

@@ -23,6 +23,7 @@ impl SettingsWindowView {
                 .unwrap_or_default()
                 .to_owned(),
             ShortcutTarget::Sequence => state.sequence_hotkey.clone(),
+            ShortcutTarget::BatchMode => state.batch_hotkey.value.clone(),
         };
         let shortcut_input = self.shortcut_input.get_or_insert_with(|| {
             cx.new(|cx| InputState::new(window, cx).placeholder("Ctrl+Alt+1"))
@@ -71,6 +72,10 @@ impl SettingsWindowView {
             ShortcutTarget::Sequence => owner.update(cx, |owner, cx| {
                 owner.select_sequence_hotkey(shortcut, cx);
                 owner.sequence_hotkey_pending
+            }),
+            ShortcutTarget::BatchMode => owner.update(cx, |owner, cx| {
+                owner.select_batch_hotkey(shortcut, cx);
+                owner.batch_hotkey.pending
             }),
         };
         if accepted {
