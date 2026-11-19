@@ -134,9 +134,7 @@ impl ClipboardView {
         });
         let action_hover = hovered.clone();
         let is_hovered = hovered.read(cx).content || hovered.read(cx).actions;
-        let background = if card.selected {
-            cx.theme().list_active
-        } else if is_hovered {
+        let hover_background = if is_hovered {
             cx.theme().list_hover
         } else {
             cx.theme().colors.list
@@ -153,40 +151,28 @@ impl ClipboardView {
         };
         let motion = gpui_kit::base::motion::Transition::new(crate::design_system::FAST)
             .easing(cx.theme().motion.easing_move.clone());
-        // Translucent color interpolation over the shared material canvas produces
-        // additive-alpha fringes. Keep surface changes immediate; actions still fade.
-        let surface_motion = if cx.theme().colors.list.a < 1. {
-            gpui_kit::base::motion::Transition::new(Duration::ZERO)
+        // Only hover interpolates. A selection may last just one key-repeat frame.
+        // Translucent surfaces still snap to avoid additive-alpha fringes.
+        let hover_background = if cx.theme().colors.list.a < 1. {
+            hover_background
         } else {
-            motion.clone()
-        };
-        let surface_channel = if cx.theme().is_dark() {
-            "history-surface-dark"
-        } else {
-            "history-surface-light"
-        };
-        let border_channel = if cx.theme().is_dark() {
-            "history-border-dark"
-        } else {
-            "history-border-light"
-        };
-        let background = visual::transition_color(
-            ElementId::from((surface_channel, id as usize)),
-            background,
-            surface_motion.clone(),
-            window,
-            cx,
-        );
-        let border = if self.batch_mode {
-            border
-        } else {
+            let channel = if cx.theme().is_dark() {
+                "history-surface-dark"
+            } else {
+                "history-surface-light"
+            };
             visual::transition_color(
-                ElementId::from((border_channel, id as usize)),
-                border,
-                surface_motion,
+                ElementId::from((channel, id as usize)),
+                hover_background,
+                motion.clone(),
                 window,
                 cx,
             )
+        };
+        let background = if card.selected {
+            cx.theme().list_active
+        } else {
+            hover_background
         };
         let action_opacity = gpui_kit::base::motion::transition(
             ElementId::from(("history-actions-opacity", id as usize)),
