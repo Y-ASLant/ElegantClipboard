@@ -56,15 +56,6 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let category_tab_count = self.toolbar_tabs().len().max(1) as f32;
-        let group_width = visual::group_select_width(
-            f32::from(window.viewport_size().width),
-            self.longest_group_label(window, cx),
-        );
-        // Deduct the group selector, row gap, and the Kit segmented-tab insets.
-        let category_width = (window.viewport_size().width
-            - px(PAGE_PADDING * 2. + group_width + visual::SPACE_2 * 2. + 6.))
-            / category_tab_count;
         div()
             .flex()
             .flex_col()
@@ -91,28 +82,7 @@ impl ClipboardView {
                             .rounded(cx.theme().radius)
                             .cleanable(true)
                             .prefix(Icon::new(IconName::Search).size(px(visual::ICON_SIZE)))
-                            .suffix(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(visual::SPACE_2))
-                                    .child(self.render_search_status(window, cx))
-                                    .child(
-                                        Button::new("history-search-info")
-                                            .text()
-                                            .icon(
-                                                Icon::new(IconName::Info)
-                                                    .size(px(visual::ICON_SMALL)),
-                                            )
-                                            .xsmall()
-                                            .accessibility_label(tr(
-                                                self.language,
-                                                "搜索说明",
-                                                "Search help",
-                                            ))
-                                            .tooltip(self.search_help()),
-                                    ),
-                            ),
+                            .suffix(self.render_search_status(window, cx)),
                     ),
             )
             .child(
@@ -123,19 +93,13 @@ impl ClipboardView {
                     .pb(px(visual::SPACE_2))
                     .flex_none()
                     // One chrome slot: filter tabs, or batch / move / locate — never stacked.
-                    .child(self.render_toolbar_slot(group_width, category_width, window, cx)),
+                    .child(self.render_toolbar_slot(window, cx)),
             )
             .into_any_element()
     }
 
     /// Filter row or a transient mode strip. Modes replace tabs; they do not stack under them.
-    fn render_toolbar_slot(
-        &mut self,
-        group_width: f32,
-        category_width: Pixels,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn render_toolbar_slot(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if self.batch_mode {
             return visual::reveal(
                 self.render_batch_strip(window, cx),
@@ -158,47 +122,22 @@ impl ClipboardView {
                 .render_locate_strip(position, total, cx)
                 .into_any_element();
         }
-        self.render_filter_toolbar(group_width, category_width, window, cx)
-            .into_any_element()
+        self.render_filter_toolbar(window, cx).into_any_element()
     }
 
-    fn render_filter_toolbar(
-        &mut self,
-        group_width: f32,
-        category_width: Pixels,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Div {
+    fn render_filter_toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> Div {
+        let group = (!self.todos_open).then(|| self.render_group_select(window, cx));
+        let mut category_space = window.viewport_size().width - px(PAGE_PADDING * 2.);
+        if let Some((width, _)) = &group {
+            category_space -= *width + px(visual::SPACE_2);
+        }
         div()
             .w_full()
             .flex()
             .items_center()
             .gap(px(visual::SPACE_2))
             .when(self.display.value.show_category_filter, |row| {
-                row.child(
-                    div().flex_1().min_w_0().child(
-                        TabBar::new("history-category-tabs")
-                            .w_full()
-                            .segmented()
-                            .h(px(visual::CONTROL_HEIGHT))
-                            .max_width(category_width)
-                            .last_empty_space(div().w_0())
-                            .selected_index(self.toolbar_tab_index())
-                            .on_click(cx.listener(|this, index: &usize, window, cx| {
-                                this.select_toolbar_tab(*index, window, cx);
-                            }))
-                            .children(self.toolbar_tabs().into_iter().map(|tab| {
-                                let (label, accessible) = self.toolbar_tab_text(tab);
-                                Tab::new()
-                                    .text_size(px(visual::TEXT_BODY))
-                                    .min_w_0()
-                                    .w(category_width)
-                                    .label(label)
-                                    .aria_label(accessible)
-                                    .flex_1()
-                            })),
-                    ),
-                )
+                row.child(self.render_category_filter(category_space, window, cx))
             })
             .when(
                 !self.display.value.show_category_filter && self.todo_preference.value.enabled,
@@ -224,12 +163,9 @@ impl ClipboardView {
                     )
                 },
             )
-            .child(
-                div()
-                    .w(px(group_width))
-                    .flex_none()
-                    .child(self.render_group_select(group_width, window, cx)),
-            )
+            .when_some(group, |row, (width, trigger)| {
+                row.child(div().ml_auto().w(width).flex_none().child(trigger))
+            })
     }
 
     fn render_batch_strip(&self, window: &Window, cx: &mut Context<Self>) -> Div {

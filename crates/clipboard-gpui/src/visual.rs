@@ -1,5 +1,5 @@
 //! Shared spacing, control sizing and motion for the native UI.
-use clipboard_core::preferences::{CardDensity, MIN_WINDOW_WIDTH};
+use clipboard_core::preferences::CardDensity;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::*;
 use std::{
@@ -139,23 +139,22 @@ pub fn thumbnail_size(density: CardDensity) -> (f32, f32) {
         CardDensity::Spacious => (140., 88.),
     }
 }
-/// Group selector width at [`MIN_WINDOW_WIDTH`]. Wider windows grow it until the label fits.
-pub const GROUP_SELECT_MIN_WIDTH: f32 = 100.;
+pub(crate) fn toolbar_text_width(text: SharedString, window: &Window, cx: &App) -> Pixels {
+    let mut style = window.text_style();
+    style.font_family = cx.theme().font_family.clone();
+    let run = style.to_run(text.len());
+    window
+        .text_system()
+        .shape_line(text, px(TEXT_BODY), &[run], None)
+        .width
+}
+
 /// Outline padding, dropdown caret, and the gap in front of the caret.
 pub const GROUP_SELECT_CHROME: f32 = 52.;
 
-/// Shared width of the group trigger and its menu.
-///
-/// The minimum window keeps the compact slot so category tabs do not shrink.
-/// Width above that goes to the selector until `label_width` plus chrome fits.
+/// Size the trigger for the current group, without taking over the category rail.
 pub fn group_select_width(viewport: f32, label_width: f32) -> f32 {
-    let reserved = PAGE_PADDING * 2. + SPACE_2 * 2. + 6.;
-    let available = (viewport - reserved).max(GROUP_SELECT_MIN_WIDTH);
-    let surplus = (available - (MIN_WINDOW_WIDTH as f32 - reserved)).max(0.);
-    let natural = (label_width + GROUP_SELECT_CHROME).max(GROUP_SELECT_MIN_WIDTH);
-    (GROUP_SELECT_MIN_WIDTH + surplus)
-        .min(natural)
-        .min(available)
+    (label_width + GROUP_SELECT_CHROME).min((viewport * 0.4).min(160.))
 }
 pub const DRAG_MOTION_DURATION: Duration = crate::design_system::SLOW;
 pub const DRAG_EDGE_ZONE: f32 = 32.;
@@ -505,23 +504,12 @@ mod card_height_tests {
 
 #[cfg(test)]
 mod group_select_width_tests {
-    use super::{
-        GROUP_SELECT_CHROME, GROUP_SELECT_MIN_WIDTH, MIN_WINDOW_WIDTH, group_select_width,
-    };
+    use super::group_select_width;
 
     #[test]
-    fn group_selector_stays_compact_until_the_window_has_surplus() {
-        let min = MIN_WINDOW_WIDTH as f32;
-        assert_eq!(group_select_width(min, 400.), GROUP_SELECT_MIN_WIDTH);
-        assert_eq!(group_select_width(min, 0.), GROUP_SELECT_MIN_WIDTH);
-        assert_eq!(
-            group_select_width(min + 80., 10_000.),
-            GROUP_SELECT_MIN_WIDTH + 80.
-        );
-        assert_eq!(
-            group_select_width(min + 500., 80.),
-            80. + GROUP_SELECT_CHROME
-        );
-        assert_eq!(group_select_width(min + 500., 0.), GROUP_SELECT_MIN_WIDTH);
+    fn long_group_names_leave_room_for_categories_without_widening_short_names() {
+        assert_eq!(group_select_width(420., 56.), group_select_width(320., 56.));
+        assert_eq!(group_select_width(320., 400.), 128.);
+        assert_eq!(group_select_width(560., 400.), 160.);
     }
 }

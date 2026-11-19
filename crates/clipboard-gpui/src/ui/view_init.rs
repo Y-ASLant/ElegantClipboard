@@ -20,7 +20,7 @@ impl ClipboardView {
             InputState::new(window, cx).placeholder(tr(
                 language,
                 "搜索剪贴板历史…",
-                "Search clipboard history…",
+                "Search history…",
             ))
         });
         let subscription = cx.subscribe_in(&search, window, |this, _, event, window, cx| {

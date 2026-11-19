@@ -122,30 +122,11 @@ pub(super) fn group_options(
 }
 
 impl ClipboardView {
-    pub(super) fn longest_group_label(&self, window: &Window, cx: &App) -> f32 {
-        let mut style = window.text_style();
-        style.font_family = cx.theme().font_family.clone();
-        let font_size = px(visual::TEXT_BODY);
-        group_options(&self.groups, self.language, self.history.group_id())
-            .into_iter()
-            .map(|option| {
-                let text = option.title;
-                f32::from(
-                    window
-                        .text_system()
-                        .shape_line(text.clone(), font_size, &[style.to_run(text.len())], None)
-                        .width,
-                )
-            })
-            .fold(0., f32::max)
-    }
-
     pub(super) fn render_group_select(
         &self,
-        width: f32,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    ) -> (Pixels, impl IntoElement + use<>) {
         let selected = self.history.group_id();
         let title = self
             .groups
@@ -153,6 +134,10 @@ impl ClipboardView {
             .find(|group| Some(group.id) == selected)
             .map(|group| SharedString::from(group.name.clone()))
             .unwrap_or_else(|| tr(self.language, "默认分组", "Default group").into());
+        let width = px(visual::group_select_width(
+            f32::from(window.viewport_size().width),
+            f32::from(visual::toolbar_text_width(title.clone(), window, cx)),
+        ));
         let owner = cx.entity().downgrade();
         let selected_focus = window
             .use_keyed_state("selected-group-focus", cx, |_, cx| cx.focus_handle())
@@ -168,7 +153,7 @@ impl ClipboardView {
             .iter()
             .position(|group| Some(group.id) == selected)
             .map_or(0, |index| index + 1);
-        Popover::new("group-menu")
+        let trigger = Popover::new("group-menu")
             .anchor(Anchor::TopRight)
             .offset(px(4.))
             .track_focus(&selected_focus)
@@ -183,12 +168,20 @@ impl ClipboardView {
                     .w_full()
                     .min_w_0()
                     .h(px(visual::CONTROL_HEIGHT))
-                    .text_size(px(visual::TEXT_BODY))
-                    .child(div().flex_1().min_w_0().truncate().child(title))
+                    .px(px(visual::SPACE_2))
+                    .accessibility_label(title.clone())
+                    .tooltip(title.clone())
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(px(visual::TEXT_BODY))
+                            .child(title),
+                    )
                     .dropdown_caret(true)
                     .disabled(
-                        self.todos_open
-                            || self.group_save_pending
+                        self.group_save_pending
                             || self.group_delete_pending
                             || self.clear_pending
                             || self.group_reorder_pending,
@@ -204,6 +197,14 @@ impl ClipboardView {
                     .group_id()
                     .map_or(GroupChoice::Default, GroupChoice::Existing);
                 let options = group_options(&view.groups, view.language, view.history.group_id());
+                let menu_width = options.iter().fold(width, |current, option| {
+                    current.max(
+                        visual::toolbar_text_width(option.title.clone(), window, cx)
+                            + px(visual::GROUP_SELECT_CHROME),
+                    )
+                });
+                let menu_width =
+                    menu_width.min(window.viewport_size().width - px(2. * PAGE_PADDING));
                 let focus_handles: Vec<_> = options
                     .iter()
                     .enumerate()
@@ -272,6 +273,7 @@ impl ClipboardView {
                                                     .flex_1()
                                                     .min_w_0()
                                                     .truncate()
+                                                    .text_size(px(visual::TEXT_BODY))
                                                     .child(option.title.clone()),
                                             ),
                                     )
@@ -310,10 +312,10 @@ impl ClipboardView {
                     .occlude()
                     .popover_style(cx)
                     .p(px(4.))
-                    // 菜单外缘与触发器槽位同宽。
-                    .w(px(width))
+                    .w(menu_width)
                     .child(list)
                     .into_any_element()
-            })
+            });
+        (width, trigger)
     }
 }
