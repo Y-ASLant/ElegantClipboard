@@ -192,7 +192,7 @@ impl ClipboardView {
             (f32::from(cursor_offset.x) * scale).round() as i32,
             (f32::from(cursor_offset.y) * scale).round() as i32,
         );
-        let Some((preview_window, preview_hwnd)) = self.open_drag_preview(&drag, window, cx) else {
+        let Some(preview_hwnd) = self.open_drag_preview(&drag, window, cx) else {
             return false;
         };
         let token = if let Some(id) = drag.paste_id() {
@@ -250,7 +250,6 @@ impl ClipboardView {
                 return;
             }
             let mut last_position = None;
-            let mut last_dimmed = false;
             let (sender, receiver) = async_channel::bounded(1);
             let frame_pending = Rc::new(Cell::new(false));
             loop {
@@ -321,22 +320,12 @@ impl ClipboardView {
                     let session = this.external_drag.as_mut()?;
                     session.native_active = payload.is_some();
                     let position = (pointer.x - session.offset.0, pointer.y - session.offset.1);
-                    let dimmed = client_pointer.zip(drag.history()).is_some_and(|(pointer, drag)| {
-                        drag.overlaps_favorite_strip(pointer - cursor_offset)
-                    });
-                    Some((session.preview_hwnd, position, dimmed, payload, ExternalDragOptions {
+                    Some((session.preview_hwnd, position, payload, ExternalDragOptions {
                         source_window: source, preview_window: Some(session.preview_hwnd),
                         preview_offset: session.offset,
                     }))
                 });
-                let Ok(Some((preview, position, dimmed, payload, options))) = state else { break; };
-                if last_dimmed != dimmed {
-                    let _ = preview_window.update(cx, |preview, _, cx| {
-                        preview.dimmed = dimmed;
-                        cx.notify();
-                    });
-                    last_dimmed = dimmed;
-                }
+                let Ok(Some((preview, position, payload, options))) = state else { break; };
                 // Native movement may re-enter GPUI. Never hold App/Window borrows here.
                 if last_position != Some(position) {
                     let movement = native::move_drag_preview(preview, position.0, position.1)
@@ -478,7 +467,7 @@ impl ClipboardView {
 
     pub(super) fn finish_external_drag(&mut self, cx: &mut Context<Self>) {
         self.history_drag_uses_gpui = false;
-        self.favorite_drop_hovered = false;
+        self.favorite_drop.hovered.set(false);
         if self.external_drag.take().is_some() {
             self.drag_preparation = None;
             self.drag_release_pending = true;

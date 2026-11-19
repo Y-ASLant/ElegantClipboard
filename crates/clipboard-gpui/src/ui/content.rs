@@ -7,7 +7,7 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if self.onboarding_visible() {
-            self.favorite_drop_bounds.set(None);
+            self.favorite_drop.bounds.set(None);
             return self.render_onboarding(window, cx).into_any_element();
         }
         let chrome = self.list_chrome.clone();
@@ -112,7 +112,7 @@ impl ClipboardView {
 
     /// Filter row or a transient mode strip. Modes replace tabs; they do not stack under them.
     fn render_toolbar_slot(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        self.favorite_drop_bounds.set(None);
+        self.favorite_drop.bounds.set(None);
         if self.batch_mode {
             return visual::reveal(
                 self.render_batch_strip(window, cx),
@@ -142,23 +142,25 @@ impl ClipboardView {
     }
 
     fn render_favorite_drop_strip(&self, cx: &Context<Self>) -> Stateful<Div> {
-        let measured = self.favorite_drop_bounds.clone();
-        let hovered = self.favorite_drop_hovered;
+        let drop_zone = self.favorite_drop.clone();
+        let hovered = drop_zone.hovered.get();
         let theme = cx.theme();
-        let (icon, label) = if self.history.favorite_only() {
-            (
-                IconName::HeartOff,
-                tr(
-                    self.language,
-                    "拖到这里取消收藏",
-                    "Drop to remove from favorites",
-                ),
+        let removing = self.history.favorite_only();
+        let icon = if removing {
+            IconName::HeartOff
+        } else {
+            IconName::Heart
+        };
+        let label = if hovered {
+            drag::favorite_release_hint(self.language, removing)
+        } else if removing {
+            tr(
+                self.language,
+                "拖到这里取消收藏",
+                "Drop to remove from favorites",
             )
         } else {
-            (
-                IconName::Heart,
-                tr(self.language, "拖到这里收藏", "Drop to favorite"),
-            )
+            tr(self.language, "拖到这里收藏", "Drop to favorite")
         };
         div()
             .id("history-favorite-drop")
@@ -180,7 +182,7 @@ impl ClipboardView {
             .child(label)
             .child(
                 canvas(
-                    move |bounds, _, _| measured.set(Some(bounds)),
+                    move |bounds, _, _| drop_zone.bounds.set(Some(bounds)),
                     |_, _, _, _| {},
                 )
                 .absolute()

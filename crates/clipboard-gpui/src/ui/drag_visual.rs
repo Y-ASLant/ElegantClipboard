@@ -25,13 +25,14 @@ pub(super) struct HistoryCardSnapshot {
 }
 
 impl HistoryCardSnapshot {
-    fn metadata_row(&self, cx: &App) -> Div {
+    fn metadata_row(&self, drop_hint: Option<&'static str>, cx: &App) -> Div {
         let source_icon = self
             .source_app_icon
             .as_deref()
             .filter(|path| !path.is_empty());
         let (show_source_name, show_source_icon) =
             source_app_parts(self.display.source_app_display, source_icon.is_some());
+        let summary = drop_hint.map_or_else(|| self.summary.clone().into(), SharedString::from);
         div()
             .h(px(visual::METADATA_ROW_HEIGHT))
             .flex_none()
@@ -52,7 +53,10 @@ impl HistoryCardSnapshot {
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .text_ellipsis()
-                    .child(self.summary.clone()),
+                    .when(drop_hint.is_some(), |summary| {
+                        summary.text_color(cx.theme().accent_foreground)
+                    })
+                    .child(summary),
             )
             .when(self.display.show_source_app, |footer| {
                 footer.child(
@@ -198,7 +202,13 @@ impl HistoryCardSnapshot {
         }
     }
 
-    pub(super) fn surface(&self, preview: bool, show_pin: bool, cx: &App) -> Div {
+    pub(super) fn surface(
+        &self,
+        preview: bool,
+        show_pin: bool,
+        drop_hint: Option<&'static str>,
+        cx: &App,
+    ) -> Div {
         let media_layout = self.is_image || self.is_files;
         let spacing = visual::card_spacing(self.display.card_density);
         let padding = visual::card_padding(self.display.card_density);
@@ -258,7 +268,7 @@ impl HistoryCardSnapshot {
                     .child(tr(self.language, "置顶", "Pinned")),
                 )
             }))
-            .child(self.metadata_row(cx))
+            .child(self.metadata_row(drop_hint, cx))
     }
 }
 
@@ -278,26 +288,25 @@ impl HistoryDrag {
         self.size.get()
     }
 
-    pub(super) fn overlaps_favorite_strip(&self, origin: Point<Pixels>) -> bool {
-        self.favorite_drop_bounds
+    pub(super) fn render_card(&self, cx: &App) -> AnyElement {
+        // The preview can cover the strip, so keep its release hint visible here.
+        let drop_hint = self
+            .favorite_drop
+            .hovered
             .get()
-            .is_some_and(|strip| strip.intersects(&Bounds::new(origin, self.size())))
-    }
-
-    pub(super) fn render_card(&self, dimmed: bool, cx: &App) -> AnyElement {
+            .then(|| drag::favorite_release_hint(self.card.language, self.favorite_only));
         drag_card(self.size(), self.card.display.card_density, cx)
-            .when(dimmed, |card| card.opacity(0.2))
-            .child(self.card.surface(true, true, cx))
+            .child(self.card.surface(true, true, drop_hint, cx))
             .into_any_element()
     }
 }
 
 impl Render for HistoryDrag {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.native_preview {
-            return div().into_any_element();
+            div().into_any_element()
+        } else {
+            self.render_card(cx)
         }
-        let dimmed = self.overlaps_favorite_strip(window.mouse_position() - self.cursor_offset);
-        self.render_card(dimmed, cx)
     }
 }

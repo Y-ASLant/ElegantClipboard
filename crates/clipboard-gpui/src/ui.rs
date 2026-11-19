@@ -205,6 +205,12 @@ struct StartupMode {
     diagnostics: Option<std::sync::Arc<crate::diagnostics::Diagnostics>>,
 }
 
+#[derive(Default)]
+struct FavoriteDropZone {
+    bounds: Cell<Option<Bounds<Pixels>>>,
+    hovered: Cell<bool>,
+}
+
 #[derive(Clone)]
 struct HistoryDrag {
     id: i64,
@@ -214,8 +220,7 @@ struct HistoryDrag {
     generation: u64,
     card: drag_visual::HistoryCardSnapshot,
     size: Rc<Cell<gpui_kit::Size<Pixels>>>,
-    favorite_drop_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
-    cursor_offset: Point<Pixels>,
+    favorite_drop: Rc<FavoriteDropZone>,
     native_preview: bool,
 }
 
@@ -476,8 +481,7 @@ struct ClipboardView {
     drag_snapshot: Option<(Vec<DbClipboardItem>, i64, u64)>,
     drag_deleted_ids: HashSet<i64>,
     drag_viewport: Rc<Cell<Option<Bounds<Pixels>>>>,
-    favorite_drop_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
-    favorite_drop_hovered: bool,
+    favorite_drop: Rc<FavoriteDropZone>,
     history_drag_uses_gpui: bool,
     drag_release_pending: bool,
     drag_token: u64,

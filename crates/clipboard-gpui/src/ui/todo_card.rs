@@ -103,7 +103,7 @@ fn memo_history_card(snapshot: &TodoDragSnapshot, preview: bool, selected: bool,
         file_icon: IconName::FileText,
         selected,
     }
-    .surface(preview, false, cx)
+    .surface(preview, false, None, cx)
 }
 
 impl ClipboardView {

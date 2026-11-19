@@ -1,5 +1,13 @@
 use super::*;
 
+pub(super) fn favorite_release_hint(language: LanguagePreference, removing: bool) -> &'static str {
+    if removing {
+        tr(language, "松手取消收藏", "Release to remove")
+    } else {
+        tr(language, "松手收藏", "Release to add")
+    }
+}
+
 impl ClipboardView {
     pub(super) fn apply_reordered(
         &mut self,
@@ -70,7 +78,8 @@ impl ClipboardView {
         drag: &HistoryDrag,
         pointer: Point<Pixels>,
     ) -> bool {
-        self.favorite_drop_bounds
+        self.favorite_drop
+            .bounds
             .get()
             .is_some_and(|bounds| bounds.contains(&pointer))
             && !self.batch_mode
@@ -79,8 +88,13 @@ impl ClipboardView {
     }
 
     pub(super) fn set_favorite_drop_hovered(&mut self, hovered: bool, cx: &mut Context<Self>) {
-        if std::mem::replace(&mut self.favorite_drop_hovered, hovered) != hovered {
+        if self.favorite_drop.hovered.replace(hovered) != hovered {
             self.list_chrome.update(cx, |_, cx| cx.notify());
+            if self.external_drag.is_some()
+                && let Some(popup) = self.drag_preview_window
+            {
+                let _ = popup.update(cx, |_, _, cx| cx.notify());
+            }
         }
     }
 
@@ -95,7 +109,7 @@ impl ClipboardView {
         {
             return false;
         }
-        self.favorite_drop_hovered = false;
+        self.favorite_drop.hovered.set(false);
         self.send(
             Command::SetFavorite {
                 id: drag.id,
@@ -132,7 +146,7 @@ impl ClipboardView {
         if self.native_drag_active() {
             return;
         }
-        self.favorite_drop_hovered = false;
+        self.favorite_drop.hovered.set(false);
         self.card_drag_direction = 0;
         let target = self.drop_target.take();
         if !self.valid_drag(drag) {
@@ -192,7 +206,7 @@ impl ClipboardView {
                 let Ok(active) = view.update(cx, |this, cx| {
                     if !this.card_drag_active(cx) {
                         if std::mem::take(&mut this.history_drag_uses_gpui) {
-                            this.favorite_drop_hovered = false;
+                            this.favorite_drop.hovered.set(false);
                             cx.notify();
                         }
                         this.card_drag_direction = 0;
