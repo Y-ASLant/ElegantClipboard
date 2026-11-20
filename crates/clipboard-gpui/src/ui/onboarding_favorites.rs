@@ -66,12 +66,27 @@ impl OnboardingFavorites {
         true
     }
 
-    fn set_favorite_from_tab(&mut self, cx: &mut Context<Self>) {
-        self.progress = match (self.favorites_only, self.progress) {
-            (true, Progress::Saved) => Progress::Removed,
-            (false, Progress::Ready | Progress::Removed) => Progress::Saved,
-            _ => return,
+    /// The favorite action only applies when the tab and progress agree:
+    /// add on「全部」, remove on「收藏」. Returns its label and next progress.
+    fn favorite_action(&self) -> Option<(&'static str, Progress)> {
+        let language = self.sample.language;
+        match (self.favorites_only, self.progress) {
+            (false, Progress::Ready | Progress::Removed) => {
+                Some((tr(language, "收藏示例", "Favorite sample"), Progress::Saved))
+            }
+            (true, Progress::Saved) => Some((
+                tr(language, "取消收藏", "Remove favorite"),
+                Progress::Removed,
+            )),
+            _ => None,
+        }
+    }
+
+    fn apply_favorite_action(&mut self, cx: &mut Context<Self>) {
+        let Some((_, next)) = self.favorite_action() else {
+            return;
         };
+        self.progress = next;
         cx.notify();
     }
 
@@ -173,7 +188,6 @@ impl Render for OnboardingFavorites {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let language = self.sample.language;
         let saved = self.progress == Progress::Saved;
-        let can_change = self.favorites_only == saved;
         let owner = cx.weak_entity();
         settings_common::settings_stack()
             .id("onboarding-favorite-practice")
@@ -201,7 +215,7 @@ impl Render for OnboardingFavorites {
                             {
                                 let _ = owner.update(cx, |this, cx| {
                                     if this.dragging && this.drop_zone.contains(event.position) {
-                                        this.set_favorite_from_tab(cx);
+                                        this.apply_favorite_action(cx);
                                     }
                                     this.cancel_drag(window, cx);
                                 });
@@ -253,20 +267,16 @@ impl Render for OnboardingFavorites {
                                 cx,
                             )),
                     )
-                    .when(can_change, |row| {
+                    .when_some(self.favorite_action(), |row, (label, _)| {
                         row.child(
                             Button::new("onboarding-favorite-action")
                                 .small()
                                 .outline()
                                 .flex_none()
                                 .disabled(self.dragging)
-                                .label(if self.favorites_only {
-                                    tr(language, "取消收藏", "Remove favorite")
-                                } else {
-                                    tr(language, "收藏示例", "Favorite sample")
-                                })
+                                .label(label)
                                 .on_click(
-                                    cx.listener(|this, _, _, cx| this.set_favorite_from_tab(cx)),
+                                    cx.listener(|this, _, _, cx| this.apply_favorite_action(cx)),
                                 ),
                         )
                     }),
