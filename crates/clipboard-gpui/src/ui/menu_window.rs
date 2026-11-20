@@ -319,12 +319,8 @@ impl HistoryMenuWindow {
         let placed = fitted_menu_bounds(self.anchor, self.screen, menu.size, wants);
         place_menu_window(native, placed, window.scale_factor());
         window.bounds_changed(cx);
-        // Refreshes requested while drawing are dropped, so the frame presented on
-        // the resized surface would stay stretched until the next unrelated redraw.
-        let handle = window.window_handle();
-        cx.defer(move |cx| {
-            let _ = handle.update(cx, |_, window, cx| window.bounds_changed(cx));
-        });
+        // This layout needs the new viewport, but GPUI drops refreshes during a draw.
+        window.defer(cx, Window::bounds_changed);
         self.fitted.set(Some(placed_key(placed)));
         self.flyout.set(wants);
     }
