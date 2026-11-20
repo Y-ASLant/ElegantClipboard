@@ -5,6 +5,8 @@
 pub struct SourceApp {
     pub name: String,
     pub executable: Option<String>,
+    /// 复制时的网页地址或文档名；仅用于显示，不参与应用过滤。
+    pub detail: Option<String>,
 }
 
 /// 「运行中应用」选择器的列表项。

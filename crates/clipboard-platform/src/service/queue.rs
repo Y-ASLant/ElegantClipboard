@@ -69,7 +69,9 @@ fn capture_bytes(command: &Command) -> Option<usize> {
     Some(
         bytes
             + source.as_ref().map_or(0, |source| {
-                source.name.capacity() + source.executable.as_ref().map_or(0, String::capacity)
+                source.name.capacity()
+                    + source.executable.as_ref().map_or(0, String::capacity)
+                    + source.detail.as_ref().map_or(0, String::capacity)
             }),
     )
 }

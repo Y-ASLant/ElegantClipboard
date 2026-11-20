@@ -152,6 +152,7 @@ fn app_filter_changes_apply_to_observed_sources() -> Result<()> {
     let notepad = source_app::SourceApp {
         name: "Notepad".into(),
         executable: Some("C:\\Windows\\notepad.exe".into()),
+        detail: None,
     };
     service.send(Command::ObservedCapture {
         content: CapturedClipboard::Text("blocked note".into()),
@@ -199,6 +200,7 @@ fn app_filter_changes_apply_to_observed_sources() -> Result<()> {
         source: Some(source_app::SourceApp {
             name: "Browser".into(),
             executable: Some("C:\\Apps\\browser.exe".into()),
+            detail: None,
         }),
         extra: Vec::new(),
         formats: Vec::new(),
@@ -242,6 +244,7 @@ fn observed_captures_keep_the_source_with_each_record() -> Result<()> {
         source: Some(source_app::SourceApp {
             name: "Editor".into(),
             executable: None,
+            detail: None,
         }),
         extra: vec![clipboard_core::NativeFormatCapture {
             name: "application/x-retained-payload".into(),
@@ -260,6 +263,7 @@ fn observed_captures_keep_the_source_with_each_record() -> Result<()> {
         source: Some(source_app::SourceApp {
             name: "Browser".into(),
             executable: None,
+            detail: None,
         }),
         extra: Vec::new(),
         formats: Vec::new(),
@@ -300,6 +304,7 @@ fn observed_captures_keep_the_source_with_each_record() -> Result<()> {
             source: Some(source_app::SourceApp {
                 name: source.into(),
                 executable: None,
+                detail: None,
             }),
             extra: Vec::new(),
             formats: vec![format.into()],
@@ -328,6 +333,7 @@ fn observed_capture_persists_a_cached_source_icon() -> Result<()> {
         source: Some(source_app::SourceApp {
             name: "Notepad".into(),
             executable: Some(executable.to_string_lossy().into_owned()),
+            detail: None,
         }),
         extra: Vec::new(),
         formats: Vec::new(),

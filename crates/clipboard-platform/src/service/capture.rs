@@ -113,6 +113,7 @@ mod tests {
             source: Some(source_app::SourceApp {
                 name: label.into(),
                 executable: None,
+                detail: None,
             }),
             warning: None,
             extra: Vec::new(),
