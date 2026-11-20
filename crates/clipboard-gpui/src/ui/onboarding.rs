@@ -90,6 +90,7 @@ impl ClipboardView {
         self.onboarding_pending
             || self.shortcut_change_pending()
             || self.theme_pending
+            || self.theme_color_pending
             || self.corner_radius.pending
             || self.language_pending
             || self.autostart.pending
@@ -302,7 +303,9 @@ impl ClipboardView {
                 practice.update(cx, |practice, cx| practice.set_language(language, cx));
                 practice.into_any_element()
             }
-            OnboardingStep::Preferences => self.onboarding_preferences(cx).into_any_element(),
+            OnboardingStep::Preferences => {
+                self.onboarding_preferences(window, cx).into_any_element()
+            }
         }
     }
 

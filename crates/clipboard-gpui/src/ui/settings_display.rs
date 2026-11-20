@@ -17,14 +17,14 @@ impl SettingsWindowView {
         let language_pending = owner_state.language_pending;
         let theme = owner_state.theme;
         let theme_pending = owner_state.theme_pending;
-        let theme_color = owner_state.theme_color;
-        let theme_color_pending = owner_state.theme_color_pending;
         let corner_radius = owner_state.corner_radius;
         let card_corner = owner_state.card_corner;
         let legacy_radius = match corner_radius.value {
             CornerRadiusPreference::Fixed(value) if ![0, 4, 16].contains(&value) => Some(value),
             _ => None,
         };
+        let theme_colors =
+            owner_state.theme_color_tabs("settings-theme-color", &self.owner, false, cx);
         // 三类语义各一行：语言/主题/主题色，圆角系三项，字体组独占整行；
         // 混排同一 wrap 行会随宽度换行出孤列且控件节奏不同。
         settings_stack()
@@ -84,32 +84,7 @@ impl SettingsWindowView {
                             ),
                             "theme-color-help",
                         )
-                        .child(choice_tabs(
-                            "settings-theme-color",
-                            &self.owner,
-                            [
-                                ThemeColor::VibrantOrange,
-                                ThemeColor::Cyan,
-                                ThemeColor::GoogleBlue,
-                                ThemeColor::Rouge,
-                            ],
-                            [
-                                tr(language, "赭石", "Ochre"),
-                                tr(language, "鸭青", "Mallard"),
-                                tr(language, "群青", "Ultramarine"),
-                                tr(language, "胭脂", "Rouge"),
-                            ],
-                            theme_color,
-                            theme_color_pending,
-                            |owner| owner.theme_color,
-                            |owner, preference, cx| {
-                                if owner.send(Command::SetThemeColor(preference), cx) {
-                                    owner.theme_color_pending = true;
-                                    cx.notify();
-                                }
-                            },
-                            cx,
-                        )),
+                        .child(theme_colors),
                     ),
             )
             .child(
