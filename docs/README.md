@@ -105,7 +105,8 @@ GPUI 原生分派在 `main.rs` 按目标选择 `windows/` 或 `unix/`；Unix 的
 | `shortcuts`、`shortcut_labels`、`paste_actions`、`storage`、`data_import` | 快捷键注册与显示、受控粘贴、数据占用与恢复到独立目录 |
 | `paste_coordinator`、`paste_requests`、`paste_delivery`、`sequence` | 私有粘贴状态、请求代次、原生投递及序列适配；序列队列与单条投递并存，投递阶段由 `wait` 是否已消费区分 |
 | `image_assets`、`thumbnail_cache` | 可见范围图片资源、后台缩略图与纹理生命周期 |
-| `onboarding`、`onboarding_shortcut`、`onboarding_practice`、`onboarding_preferences`、`content`、`presentation` | 首次引导导航、快捷键配置、隔离练习教程与初始偏好、内容展示助手、主题及本地化展示 |
+| `onboarding`、`onboarding_shortcut`、`onboarding_practice`、`onboarding_favorites`、`onboarding_preferences` | 首次引导的步骤与导航、真实快捷键配置、隔离的搜索粘贴及拖拽收藏练习、初始偏好 |
+| `favorite_drop`、`content`、`presentation` | 主列表与引导共用的收藏落点、主界面内容布局、主题及本地化展示 |
 
 纯状态算法仍在 `state.rs`，对应行为测试在 `state/tests.rs`；UI 专属布局、拖拽和预览测试保留在其所属子模块。`ui/thumbnail_cache.rs` 负责列表缩略图的后台解码、两任务并发限制、外部文件版本和过期结果校验；`ui/image_assets.rs` 将其与可见范围、拖动引用和纹理回收衔接，原始图片仍用于悬停预览与复制。
 

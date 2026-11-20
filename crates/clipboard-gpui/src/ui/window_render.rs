@@ -226,11 +226,15 @@ fn pointer_press_layer(cx: &mut Context<ClipboardView>) -> impl IntoElement {
                 }
                 let _ = owner.update(cx, |this, cx| {
                     if event.button == MouseButton::Left {
-                        // A new native press cannot belong to a drag that missed MouseUp.
-                        if this.card_drag_active(cx) {
-                            this.cancel_card_drag(window, cx);
+                        if this.onboarding_visible() {
+                            this.cancel_onboarding_drag(window, cx);
+                        } else {
+                            // A new press cannot belong to a drag that missed MouseUp.
+                            if this.card_drag_active(cx) {
+                                this.cancel_card_drag(window, cx);
+                            }
+                            this.drag_release_pending = false;
                         }
-                        this.drag_release_pending = false;
                     }
                     this.close_history_menu(cx);
                 });

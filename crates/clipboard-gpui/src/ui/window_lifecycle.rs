@@ -219,7 +219,7 @@ impl ClipboardView {
     }
 
     pub(super) fn hide_visible_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.card_drag_active(cx)
+        if (self.card_drag_active(cx) && !self.onboarding_visible())
             || self.paste_state.pending()
             || self.paste_state.merging()
             || self.batch_pending
@@ -286,7 +286,7 @@ impl ClipboardView {
     }
 
     pub(super) fn hide_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.card_drag_active(cx) {
+        if self.card_drag_active(cx) && !self.onboarding_visible() {
             return;
         }
         // A standalone editor survives panel hiding. An in-panel note is only
@@ -310,6 +310,7 @@ impl ClipboardView {
         self.window_show_task = None;
         self.suspend_onboarding(cx);
         if self.onboarding_visible() {
+            self.cancel_onboarding_drag(window, cx);
             self.paste_state.set_target(None);
             return;
         }
@@ -352,6 +353,7 @@ impl ClipboardView {
             return;
         }
         if self.onboarding_visible() {
+            self.dismiss_onboarding(window, cx);
             cx.stop_propagation();
             return;
         }

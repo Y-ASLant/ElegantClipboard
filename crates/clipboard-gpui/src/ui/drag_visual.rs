@@ -294,7 +294,7 @@ impl HistoryDrag {
             .favorite_drop
             .hovered
             .get()
-            .then(|| drag::favorite_release_hint(self.card.language, self.favorite_only));
+            .then(|| favorite_drop::release_hint(self.card.language, self.favorite_only));
         drag_card(self.size(), self.card.display.card_density, cx)
             .child(self.card.surface(true, true, drop_hint, cx))
             .into_any_element()

@@ -128,63 +128,17 @@ impl ClipboardView {
                 .into_any_element();
         }
         if !self.todos_open && self.favorite_history_drag_active(cx) {
-            return self.render_favorite_drop_strip(cx).into_any_element();
+            return self
+                .favorite_drop
+                .strip(self.language, self.history.favorite_only(), cx)
+                .on_drop(cx.listener(|this, drag: &HistoryDrag, window, cx| {
+                    if this.external_drag.is_none() {
+                        this.drop_history_favorite_at(drag, window.mouse_position(), cx);
+                    }
+                }))
+                .into_any_element();
         }
         self.render_filter_toolbar(window, cx).into_any_element()
-    }
-
-    fn render_favorite_drop_strip(&self, cx: &Context<Self>) -> Stateful<Div> {
-        let drop_zone = self.favorite_drop.clone();
-        let hovered = drop_zone.hovered.get();
-        let theme = cx.theme();
-        let removing = self.history.favorite_only();
-        let icon = if removing {
-            IconName::HeartOff
-        } else {
-            IconName::Heart
-        };
-        let label = if hovered {
-            drag::favorite_release_hint(self.language, removing)
-        } else if removing {
-            tr(
-                self.language,
-                "拖到这里取消收藏",
-                "Drop to remove from favorites",
-            )
-        } else {
-            tr(self.language, "拖到这里收藏", "Drop to favorite")
-        };
-        div()
-            .id("history-favorite-drop")
-            .relative()
-            .w_full()
-            .h(px(visual::CONTROL_HEIGHT))
-            .flex()
-            .items_center()
-            .justify_center()
-            .gap(px(visual::SPACE_2))
-            .rounded(theme.radius)
-            .border(px(visual::BORDER_WIDTH))
-            .border_dashed()
-            .border_color(theme.ring.opacity(if hovered { 1. } else { 0.7 }))
-            .text_color(theme.accent_foreground)
-            .text_size(visual::FILTER_LABEL_SIZE)
-            .when(hovered, |target| target.bg(theme.accent))
-            .child(Icon::new(icon).size(px(visual::ICON_SIZE)))
-            .child(label)
-            .child(
-                canvas(
-                    move |bounds, _, _| drop_zone.bounds.set(Some(bounds)),
-                    |_, _, _, _| {},
-                )
-                .absolute()
-                .inset_0(),
-            )
-            .on_drop(cx.listener(|this, drag: &HistoryDrag, window, cx| {
-                if this.external_drag.is_none() {
-                    this.drop_history_favorite_at(drag, window.mouse_position(), cx);
-                }
-            }))
     }
 
     fn render_filter_toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> Div {

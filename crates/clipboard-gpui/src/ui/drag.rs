@@ -1,13 +1,5 @@
 use super::*;
 
-pub(super) fn favorite_release_hint(language: LanguagePreference, removing: bool) -> &'static str {
-    if removing {
-        tr(language, "松手取消收藏", "Release to remove")
-    } else {
-        tr(language, "松手收藏", "Release to add")
-    }
-}
-
 impl ClipboardView {
     pub(super) fn apply_reordered(
         &mut self,
@@ -78,10 +70,7 @@ impl ClipboardView {
         drag: &HistoryDrag,
         pointer: Point<Pixels>,
     ) -> bool {
-        self.favorite_drop
-            .bounds
-            .get()
-            .is_some_and(|bounds| bounds.contains(&pointer))
+        self.favorite_drop.contains(pointer)
             && !self.batch_mode
             && self.group_move_id.is_none()
             && self.valid_drag(drag)

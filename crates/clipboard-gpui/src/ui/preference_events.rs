@@ -461,7 +461,6 @@ impl ClipboardView {
         self.onboarding_pending = false;
         match result {
             Ok(()) => {
-                self.onboarding_completed = true;
                 self.is_error = false;
                 self.leave_onboarding(window, cx);
             }

@@ -11,6 +11,8 @@ mod editor_actions;
 mod editor_window;
 mod events;
 mod external_drag;
+mod favorite_drop;
+use favorite_drop::FavoriteDropZone;
 mod file_cards;
 mod group_select;
 mod groups;
@@ -205,12 +207,6 @@ struct StartupMode {
     diagnostics: Option<std::sync::Arc<crate::diagnostics::Diagnostics>>,
 }
 
-#[derive(Default)]
-struct FavoriteDropZone {
-    bounds: Cell<Option<Bounds<Pixels>>>,
-    hovered: Cell<bool>,
-}
-
 #[derive(Clone)]
 struct HistoryDrag {
     id: i64,
@@ -386,15 +382,15 @@ struct ClipboardView {
     row_sizes: Rc<Vec<gpui_kit::Size<Pixels>>>,
     row_offsets: Vec<Pixels>,
     monitoring: bool,
-    onboarding_completed: bool,
-    onboarding_step: usize,
+    onboarding_step: onboarding::OnboardingStep,
     onboarding_revision: usize,
     onboarding_pending: bool,
-    show_onboarding: bool,
+    onboarding_mode: Option<onboarding::OnboardingMode>,
     onboarding_hotkey_used: bool,
     onboarding_error: Option<String>,
     onboarding_shortcut: Option<Entity<onboarding::shortcut::OnboardingShortcut>>,
     onboarding_practice: Option<Entity<onboarding::practice::OnboardingPractice>>,
+    onboarding_favorites: Option<Entity<onboarding::favorites::OnboardingFavorites>>,
     settings_window: Option<AnyWindowHandle>,
     todo_toast: Option<WindowHandle<todo_toast::TodoToastWindow>>,
     history_menu_window: Option<AnyWindowHandle>,
