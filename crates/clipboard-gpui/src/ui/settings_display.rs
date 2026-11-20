@@ -202,8 +202,8 @@ impl SettingsWindowView {
                     tr(language, "分类筛选标签", "Category filter tabs"),
                     tr(
                         language,
-                        "与主窗口工具栏分段一致；「全部」始终显示，且至少保留两个标签。关闭上方“显示分类筛选”时隐藏整条分段。",
-                        "Matches the history toolbar tabs; “All” is always shown and at least two tabs stay visible. Turn off “Show category filters” above to hide the whole bar.",
+                        "与主窗口工具栏分段一致；「全部」和「收藏」始终显示。关闭上方“显示分类筛选”时隐藏整条分段。",
+                        "Matches the history toolbar tabs; “All” and “Favorites” always stay on. Turn off “Show category filters” above to hide the whole bar.",
                     ),
                     "category-tabs-help",
                 )
@@ -216,16 +216,12 @@ impl SettingsWindowView {
                                 let owner = self.owner.clone();
                                 let tabs_enabled =
                                     display.show_category_filter && !display_pending;
-                                // 首项即「全部」：锁定开启，不受关闭影响。
-                                let is_all_tab = index == 0;
-                                let at_minimum_tabs =
-                                    display.category_tabs.enabled_count() <= 2 && selected;
-                                let checkbox_disabled =
-                                    !tabs_enabled || is_all_tab || at_minimum_tabs;
+                                // 「全部」和「收藏」锁定开启。保存时还会再写回。
+                                let locked = index <= 1;
                                 settings_toggle(cx, Checkbox::new(("category-tab", index)))
                                     .label(tr(language, chinese, english))
-                                    .checked(selected)
-                                    .disabled(checkbox_disabled)
+                                    .checked(selected || locked)
+                                    .disabled(!tabs_enabled || locked)
                                     .on_change(move |checked, _, cx| {
                                         let _ = owner.update(cx, |owner, cx| {
                                             let mut next = owner.display.value;
@@ -234,11 +230,6 @@ impl SettingsWindowView {
                                                 index,
                                                 *checked,
                                             );
-                                            // 开启分类栏时「全部」必须保留；disabled 已阻止
-                                            // 关闭「全部」或缩减到两标签以下，故不再二次校验。
-                                            if next.show_category_filter {
-                                                next.category_tabs.all = true;
-                                            }
                                             owner.save_display(next, cx);
                                         });
                                     })

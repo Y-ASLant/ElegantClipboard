@@ -378,9 +378,14 @@ impl Preferences {
     }
 
     pub fn display(&self) -> Result<DisplayPreference> {
-        self.read_json(DISPLAY_KEY, |preference: &DisplayPreference| {
-            preference.valid()
-        })
+        Ok(self
+            .repository
+            .get(DISPLAY_KEY)?
+            .as_deref()
+            .and_then(|value| serde_json::from_str(value).ok())
+            .map(DisplayPreference::with_locked_category_tabs)
+            .filter(|preference| preference.valid())
+            .unwrap_or_default())
     }
 
     pub fn set_display(&self, preference: DisplayPreference) -> Result<()> {

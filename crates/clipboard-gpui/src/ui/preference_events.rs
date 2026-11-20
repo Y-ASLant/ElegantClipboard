@@ -64,7 +64,7 @@ impl ClipboardView {
         self.save_pending(
             |this| &mut this.display,
             true,
-            display,
+            display.with_locked_category_tabs(),
             Command::SetDisplay,
             cx,
         );
