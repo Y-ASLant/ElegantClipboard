@@ -212,12 +212,13 @@ impl SettingsWindowView {
                             .into_iter()
                             .zip(CATEGORY_TAB_SPECS)
                             .enumerate()
-                            .map(|(index, (selected, (_, chinese, english, _)))| {
+                            .map(|(index, (selected, (filter, chinese, english, _)))| {
                                 let owner = self.owner.clone();
                                 let tabs_enabled =
                                     display.show_category_filter && !display_pending;
-                                // 「全部」和「收藏」锁定开启。保存时还会再写回。
-                                let locked = index <= 1;
+                                // Favorites is the `None` filter. Both it and All stay on.
+                                let locked =
+                                    matches!(filter, None | Some(ContentCategory::All));
                                 settings_toggle(cx, Checkbox::new(("category-tab", index)))
                                     .label(tr(language, chinese, english))
                                     .checked(selected || locked)

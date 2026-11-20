@@ -370,7 +370,7 @@ impl Default for DisplayPreference {
 }
 
 impl DisplayPreference {
-    /// A shown filter bar cannot persist with「全部」or「收藏」turned off.
+    /// Turns「全部」and「收藏」on when the filter bar is shown.
     pub fn with_locked_category_tabs(mut self) -> Self {
         if self.show_category_filter {
             self.category_tabs.all = true;
