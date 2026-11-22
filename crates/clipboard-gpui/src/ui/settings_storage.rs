@@ -227,90 +227,33 @@ impl SettingsWindowView {
             ))
             .disabled(reset_pending || import_pending)
             .on_click(move |_, window, cx| {
-                let dialog_owner = owner.clone();
-                let _ = dialog_owner.update(cx, |owner, cx| {
-                    owner.reset_settings_error = None;
-                    cx.notify();
-                });
-                window.open_dialog(cx, move |dialog, _, cx| {
-                    let (pending, error) = dialog_owner
-                        .upgrade()
-                        .map(|owner| {
-                            let owner = owner.read(cx);
-                            (owner.reset_settings_pending, owner.reset_settings_error.clone())
-                        })
-                        .unwrap_or((false, None));
-                    let confirm_owner = dialog_owner.clone();
-                    let keyboard_owner = dialog_owner.clone();
-                    let cancel_owner = dialog_owner.clone();
-                    dialog_shell(dialog, cx)
-                        .title(dialog_title(
-                            tr(language, "重置应用设置？", "Reset app settings?"),
-                            cx,
-                        ))
-                        .on_ok(move |_, window, cx| {
-                            let _ = keyboard_owner.update(cx, |owner, cx| {
-                                owner.confirm_reset_settings(cx);
-                            });
-                            window.refresh();
-                            false
-                        })
-                        .on_cancel(move |_, _, cx| {
-                            cancel_owner
-                                .upgrade()
-                                .is_none_or(|owner| !owner.read(cx).reset_settings_pending)
-                        })
-                        .child(
-                            dialog_copy()
-                                .flex()
-                                .flex_col()
-                                .gap_2()
-                                .child(tr(
-                                    language,
-                                    "主题、热键、粘贴与采集等设置将恢复默认。",
-                                    "Theme, hotkeys, paste, and capture settings return to defaults.",
-                                ))
-                                .child(
-                                    div()
-                                        .text_sm()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(tr(
-                                            language,
-                                            "剪贴板历史、分组与图片不会删除。完成后应用会自动重启。",
-                                            "Clipboard history, groups, and images are kept. The app restarts when done.",
-                                        )),
-                                )
-                                .when_some(error, |content, error| {
-                                    content.child(Alert::error("reset-settings-error", error).small())
-                                }),
-                        )
-                        .footer(
-                            dialog_footer(cx)
-                                .child(
-                                    Button::new("reset-settings-cancel")
-                                        .outline()
-                                        .label(tr(language, "取消", "Cancel"))
-                                        .disabled(pending)
-                                        .on_click(|_, window, cx| window.close_dialog(cx)),
-                                )
-                                .child(
-                                    Button::new("reset-settings-confirm")
-                                        .danger()
-                                        .label(if pending {
-                                            tr(language, "正在重置…", "Resetting…")
-                                        } else {
-                                            tr(language, "重置并重启", "Reset and restart")
-                                        })
-                                        .disabled(pending)
-                                        .on_click(move |_, window, cx| {
-                                            let _ = confirm_owner.update(cx, |owner, cx| {
-                                                owner.confirm_reset_settings(cx);
-                                            });
-                                            window.refresh();
-                                        }),
-                                ),
-                        )
-                });
+                open_settings_danger_dialog(
+                    window,
+                    cx,
+                    owner.clone(),
+                    SettingsDangerDialog {
+                        title: tr(language, "重置应用设置？", "Reset app settings?"),
+                        body: tr(
+                            language,
+                            "主题、热键、粘贴与采集等设置将恢复默认。",
+                            "Theme, hotkeys, paste, and capture settings return to defaults.",
+                        ),
+                        detail: tr(
+                            language,
+                            "剪贴板历史、分组与图片不会删除。完成后应用会自动重启。",
+                            "Clipboard history, groups, and images are kept. The app restarts when done.",
+                        ),
+                        cancel_id: "reset-settings-cancel",
+                        confirm_id: "reset-settings-confirm",
+                        error_id: "reset-settings-error",
+                        cancel_label: tr(language, "取消", "Cancel"),
+                        confirm_label: tr(language, "重置并重启", "Reset and restart"),
+                        pending_label: tr(language, "正在重置…", "Resetting…"),
+                    },
+                    |view| view.reset_settings_error = None,
+                    |view| (view.reset_settings_pending, view.reset_settings_error.clone()),
+                    |view, cx| view.confirm_reset_settings(cx),
+                );
             })
     }
 
@@ -319,7 +262,7 @@ impl SettingsWindowView {
         language: LanguagePreference,
         clear_all_pending: bool,
     ) -> Button {
-        let privacy_owner = self.owner.clone();
+        let owner = self.owner.clone();
         Button::new("settings-window-clear-all")
             .danger()
             .h(px(visual::CONTROL_HEIGHT_LARGE))
@@ -332,90 +275,33 @@ impl SettingsWindowView {
             ))
             .disabled(clear_all_pending)
             .on_click(move |_, window, cx| {
-                let dialog_owner = privacy_owner.clone();
-                let _ = dialog_owner.update(cx, |owner, cx| {
-                    owner.clear_all_error = None;
-                    cx.notify();
-                });
-                window.open_dialog(cx, move |dialog, _, cx| {
-                    let (pending, error) = dialog_owner
-                        .upgrade()
-                        .map(|owner| {
-                            let owner = owner.read(cx);
-                            (owner.clear_all_pending, owner.clear_all_error.clone())
-                        })
-                        .unwrap_or((false, None));
-                    let confirm_owner = dialog_owner.clone();
-                    let keyboard_owner = dialog_owner.clone();
-                    let cancel_owner = dialog_owner.clone();
-                    dialog_shell(dialog, cx)
-                        .title(dialog_title(
-                            tr(language, "删除全部历史？", "Delete all history?"),
-                            cx,
-                        ))
-                        .on_ok(move |_, window, cx| {
-                            let _ = keyboard_owner.update(cx, |owner, cx| {
-                                owner.clear_all_history(cx);
-                            });
-                            window.refresh();
-                            false
-                        })
-                        .on_cancel(move |_, _, cx| {
-                            cancel_owner
-                                .upgrade()
-                                .is_none_or(|owner| !owner.read(cx).clear_all_pending)
-                        })
-                        .child(
-                            dialog_copy()
-                                .flex()
-                                .flex_col()
-                                .gap_2()
-                                .child(tr(
-                                    language,
-                                    "所有分组中的记录都会被删除，包括置顶和收藏。",
-                                    "All history in every group is deleted, including pinned and favorite items.",
-                                ))
-                                .child(
-                                    div()
-                                        .text_sm()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(tr(
-                                            language,
-                                            "设置和自定义分组会保留；内容及受管媒体无法恢复，可先导出备份。",
-                                            "Settings and custom groups will be kept. Content and managed media cannot be recovered; export a backup first if needed.",
-                                        )),
-                                )
-                                .when_some(error, |content, error| {
-                                    content.child(Alert::error("clear-all-error", error).small())
-                                }),
-                        )
-                        .footer(
-                            dialog_footer(cx)
-                                .child(
-                                    Button::new("clear-all-history-cancel")
-                                        .outline()
-                                        .label(tr(language, "取消", "Cancel"))
-                                        .disabled(pending)
-                                        .on_click(|_, window, cx| window.close_dialog(cx)),
-                                )
-                                .child(
-                                    Button::new("clear-all-history-confirm")
-                                        .danger()
-                                        .label(if pending {
-                                            tr(language, "正在删除…", "Deleting…")
-                                        } else {
-                                            tr(language, "删除", "Delete")
-                                        })
-                                        .disabled(pending)
-                                        .on_click(move |_, window, cx| {
-                                            let _ = confirm_owner.update(cx, |owner, cx| {
-                                                owner.clear_all_history(cx);
-                                            });
-                                            window.refresh();
-                                        }),
-                                ),
-                        )
-                });
+                open_settings_danger_dialog(
+                    window,
+                    cx,
+                    owner.clone(),
+                    SettingsDangerDialog {
+                        title: tr(language, "删除全部历史？", "Delete all history?"),
+                        body: tr(
+                            language,
+                            "所有分组中的记录都会被删除，包括置顶和收藏。",
+                            "All history in every group is deleted, including pinned and favorite items.",
+                        ),
+                        detail: tr(
+                            language,
+                            "设置和自定义分组会保留；内容及受管媒体无法恢复，可先导出备份。",
+                            "Settings and custom groups will be kept. Content and managed media cannot be recovered; export a backup first if needed.",
+                        ),
+                        cancel_id: "clear-all-history-cancel",
+                        confirm_id: "clear-all-history-confirm",
+                        error_id: "clear-all-error",
+                        cancel_label: tr(language, "取消", "Cancel"),
+                        confirm_label: tr(language, "删除", "Delete"),
+                        pending_label: tr(language, "正在删除…", "Deleting…"),
+                    },
+                    |view| view.clear_all_error = None,
+                    |view| (view.clear_all_pending, view.clear_all_error.clone()),
+                    |view, cx| view.clear_all_history(cx),
+                );
             })
     }
 }

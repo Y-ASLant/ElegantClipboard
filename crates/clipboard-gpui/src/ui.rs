@@ -92,8 +92,8 @@ pub use startup::run;
 use file_cards::{FileCardInfo, image_file_dimensions, image_file_record, single_file_image_path};
 use navigation::{history_row_height, history_top_row, show_history_scroll_to_top};
 use presentation::{
-    apply_theme, dialog_copy, dialog_footer, dialog_shell, dialog_title, format_bytes,
-    localize_service_message, tr, window_shell,
+    SettingsDangerDialog, apply_theme, dialog_copy, dialog_footer, dialog_shell, dialog_title,
+    format_bytes, localize_service_message, open_settings_danger_dialog, tr, window_shell,
 };
 use shortcut_labels::{
     hotkey_label, paste_registration_summary, shortcut_binding_display, shortcut_from_keystroke,

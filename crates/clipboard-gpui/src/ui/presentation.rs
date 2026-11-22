@@ -78,6 +78,113 @@ pub(super) fn dialog_copy() -> Div {
         .line_height(relative(visual::COPY_LINE_HEIGHT))
 }
 
+/// Static labels for a settings danger confirm (clear data / reset prefs).
+#[derive(Clone, Copy)]
+pub(super) struct SettingsDangerDialog {
+    pub title: &'static str,
+    pub body: &'static str,
+    pub detail: &'static str,
+    pub cancel_id: &'static str,
+    pub confirm_id: &'static str,
+    pub error_id: &'static str,
+    pub cancel_label: &'static str,
+    pub confirm_label: &'static str,
+    pub pending_label: &'static str,
+}
+
+/// Open a danger confirm bound to `ClipboardView` pending/error fields.
+/// Callers supply clear/read/confirm so each action keeps its own state without a second dialog type.
+pub(super) fn open_settings_danger_dialog(
+    window: &mut Window,
+    cx: &mut App,
+    owner: WeakEntity<ClipboardView>,
+    dialog: SettingsDangerDialog,
+    mut clear_error: impl FnMut(&mut ClipboardView),
+    read_state: impl Fn(&ClipboardView) -> (bool, Option<String>) + Clone + 'static,
+    on_confirm: impl Fn(&mut ClipboardView, &mut Context<ClipboardView>) + Clone + 'static,
+) {
+    let _ = owner.update(cx, |view, cx| {
+        clear_error(view);
+        cx.notify();
+    });
+    let SettingsDangerDialog {
+        title,
+        body,
+        detail,
+        cancel_id,
+        confirm_id,
+        error_id,
+        cancel_label,
+        confirm_label,
+        pending_label,
+    } = dialog;
+    window.open_dialog(cx, move |shell, _, cx| {
+        let (pending, error) = owner
+            .upgrade()
+            .map(|entity| read_state(entity.read(cx)))
+            .unwrap_or((false, None));
+        let confirm_owner = owner.clone();
+        let keyboard_owner = owner.clone();
+        let cancel_owner = owner.clone();
+        let read_cancel = read_state.clone();
+        let confirm_click = on_confirm.clone();
+        let confirm_ok = on_confirm.clone();
+        dialog_shell(shell, cx)
+            .title(dialog_title(title, cx))
+            .on_ok(move |_, window, cx| {
+                let _ = keyboard_owner.update(cx, |view, cx| confirm_ok(view, cx));
+                window.refresh();
+                false
+            })
+            .on_cancel(move |_, _, cx| {
+                cancel_owner
+                    .upgrade()
+                    .is_none_or(|entity| !read_cancel(entity.read(cx)).0)
+            })
+            .child(
+                dialog_copy()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(body)
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(detail),
+                    )
+                    .when_some(error, |content, error| {
+                        content.child(Alert::error(error_id, error).small())
+                    }),
+            )
+            .footer(
+                dialog_footer(cx)
+                    .child(
+                        Button::new(cancel_id)
+                            .outline()
+                            .label(cancel_label)
+                            .disabled(pending)
+                            .on_click(|_, window, cx| window.close_dialog(cx)),
+                    )
+                    .child(
+                        Button::new(confirm_id)
+                            .danger()
+                            .label(if pending {
+                                pending_label
+                            } else {
+                                confirm_label
+                            })
+                            .disabled(pending)
+                            .on_click(move |_, window, cx| {
+                                let _ =
+                                    confirm_owner.update(cx, |view, cx| confirm_click(view, cx));
+                                window.refresh();
+                            }),
+                    ),
+            )
+    });
+}
+
 pub(super) fn tr(
     language: LanguagePreference,
     chinese: &'static str,
