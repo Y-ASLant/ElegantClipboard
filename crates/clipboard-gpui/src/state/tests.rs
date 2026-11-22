@@ -402,3 +402,24 @@ fn late_search_results_are_rejected_and_selection_follows_ids() -> anyhow::Resul
     assert_eq!(state.selected, None);
     Ok(())
 }
+
+#[test]
+fn source_app_visible_name_keeps_detail_when_enabled() {
+    assert_eq!(
+        source_app_visible_name("chrome：https://example.com", true),
+        "chrome：https://example.com"
+    );
+}
+
+#[test]
+fn source_app_visible_name_strips_detail_when_disabled() {
+    assert_eq!(
+        source_app_visible_name("chrome：https://example.com", false),
+        "chrome"
+    );
+}
+
+#[test]
+fn source_app_visible_name_leaves_plain_name() {
+    assert_eq!(source_app_visible_name("Notepad", false), "Notepad");
+}

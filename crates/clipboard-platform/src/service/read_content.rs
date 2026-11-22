@@ -78,7 +78,11 @@ pub(super) fn read_content(
     clipboard: &ClipboardContext,
     allowed: &CaptureFormatPreference,
     #[cfg(target_os = "linux")] formats: Option<&[String]>,
-) -> Result<(Option<CapturedClipboard>, Option<&'static str>)> {
+) -> Result<(
+    Option<CapturedClipboard>,
+    Option<&'static str>,
+    Option<String>,
+)> {
     if allowed.allows_files() && clipboard.has(ContentFormat::Files) {
         #[cfg(target_os = "linux")]
         let paths = super::file_list::read_files(clipboard)?;
@@ -93,18 +97,22 @@ pub(super) fn read_content(
         {
             anyhow::bail!("文件路径列表为空或超过限制，本次复制未保存");
         }
-        return Ok((Some(CapturedClipboard::Files(paths)), None));
+        return Ok((Some(CapturedClipboard::Files(paths)), None, None));
     }
-    let html = allowed
+    let html_capture = allowed
         .allows_html()
         .then(|| {
             clipboard
                 .has(ContentFormat::Html)
                 .then(|| super::read_html::read_html(clipboard).ok())
                 .flatten()
-                .filter(|value| !value.is_empty())
+                .filter(|capture| !capture.html.is_empty())
         })
         .flatten();
+    let source_url = html_capture
+        .as_ref()
+        .and_then(|capture| capture.source_url.clone());
+    let html = html_capture.map(|capture| capture.html);
     let rtf = allowed
         .allows_rtf()
         .then(|| {
@@ -137,7 +145,7 @@ pub(super) fn read_content(
         && clipboard.has(ContentFormat::Image)
         && let Ok(image) = read_image(clipboard)
     {
-        return Ok((Some(image), None));
+        return Ok((Some(image), None, source_url));
     }
     let mut warning = None;
     if html.is_some() || rtf.is_some() {
@@ -145,7 +153,11 @@ pub(super) fn read_content(
             + rtf.as_ref().map_or(0, Vec::len)
             + text.as_ref().map_or(0, String::len);
         if bytes <= MAX_TEXT_BYTES {
-            return Ok((Some(CapturedClipboard::Rich { html, rtf, text }), None));
+            return Ok((
+                Some(CapturedClipboard::Rich { html, rtf, text }),
+                None,
+                source_url,
+            ));
         }
         if text.is_none() {
             anyhow::bail!("富文本超过 1 MiB 且没有纯文本，未保存");
@@ -156,17 +168,17 @@ pub(super) fn read_content(
         if text.len() > MAX_TEXT_BYTES {
             anyhow::bail!("文本超过 1 MiB，未保存");
         }
-        return Ok((Some(CapturedClipboard::Text(text)), warning));
+        return Ok((Some(CapturedClipboard::Text(text)), warning, source_url));
     }
     if allowed.allows_image() && clipboard.has(ContentFormat::Image) {
         match read_image(clipboard) {
             // 源应用广播了图片格式但数据读不到（微信 CF_DIBV5 延迟渲染/空句柄，
             // 重试后仍 OSError(0) 或不完整 PNG）：复制本身成功，静默跳过。
-            Err(error) if is_missing_image_data(&error) => Ok((None, None)),
-            result => Ok((Some(result?), None)),
+            Err(error) if is_missing_image_data(&error) => Ok((None, None, source_url)),
+            result => Ok((Some(result?), None, source_url)),
         }
     } else {
-        Ok((None, None))
+        Ok((None, None, source_url))
     }
 }
 

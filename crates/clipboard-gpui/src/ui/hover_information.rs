@@ -139,6 +139,7 @@ impl HoverInformation {
                 .as_deref()
                 .filter(|source| !source.is_empty())
         {
+            let source = crate::state::source_app_visible_name(source, details.source_url);
             information.push("来源", "Source", source.to_owned());
         }
         if details.captured_at && !item.created_at.is_empty() {

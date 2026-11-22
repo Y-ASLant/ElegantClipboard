@@ -24,6 +24,8 @@ pub struct HoverPreviewDetails {
     pub extension: bool,
     pub formats: bool,
     pub source: bool,
+    /// When true with `source`, hover shows `app：url/doc` instead of app only.
+    pub source_url: bool,
     pub captured_at: bool,
     pub hint: bool,
 }
@@ -40,6 +42,7 @@ impl Default for HoverPreviewDetails {
             extension: true,
             formats: true,
             source: true,
+            source_url: true,
             captured_at: true,
             hint: true,
         }

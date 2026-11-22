@@ -117,7 +117,7 @@ pub(super) fn read_clipboard(
             formats: Vec::new(),
         });
     }
-    let (content, warning) = read_content(
+    let (content, warning, _) = read_content(
         clipboard,
         allowed,
         #[cfg(target_os = "linux")]

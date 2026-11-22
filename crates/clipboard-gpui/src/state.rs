@@ -16,6 +16,14 @@ pub fn source_app_parts(mode: SourceAppDisplay, has_icon: bool) -> (bool, bool) 
     }
 }
 
+/// Labels are `app` or `app：url/doc`. Cards pass `false`; hover uses `HoverPreviewDetails::source_url`.
+pub fn source_app_visible_name(stored: &str, show_source_url: bool) -> &str {
+    if show_source_url {
+        return stored;
+    }
+    stored.split_once('：').map_or(stored, |(name, _)| name)
+}
+
 pub fn format_card_time(
     created_at: &str,
     format: TimeFormat,

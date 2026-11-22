@@ -1,7 +1,13 @@
 use anyhow::Result;
 use clipboard_rs::{Clipboard, ClipboardContext};
 
-pub(crate) fn read_html(clipboard: &ClipboardContext) -> Result<String> {
+/// HTML body from the clipboard, plus CF_HTML `SourceURL` when the header has one.
+pub(crate) struct HtmlCapture {
+    pub html: String,
+    pub source_url: Option<String>,
+}
+
+pub(crate) fn read_html(clipboard: &ClipboardContext) -> Result<HtmlCapture> {
     #[cfg(windows)]
     {
         let bytes =
@@ -11,15 +17,20 @@ pub(crate) fn read_html(clipboard: &ClipboardContext) -> Result<String> {
     }
     #[cfg(not(windows))]
     {
-        super::read_content::retry_clipboard_read(|| clipboard.get_html())
-            .map_err(|error| anyhow::anyhow!("读取剪贴板 HTML 失败：{error}"))
+        let html = super::read_content::retry_clipboard_read(|| clipboard.get_html())
+            .map_err(|error| anyhow::anyhow!("读取剪贴板 HTML 失败：{error}"))?;
+        Ok(HtmlCapture {
+            html,
+            source_url: None,
+        })
     }
 }
 
 #[cfg(any(windows, test))]
-fn parse_cf_html(bytes: &[u8]) -> Result<String> {
+fn parse_cf_html(bytes: &[u8]) -> Result<HtmlCapture> {
     use anyhow::{Context, bail};
 
+    let source_url = source_url_from_cf_html(bytes);
     let bytes = bytes.strip_suffix(&[0]).unwrap_or(bytes);
     let mut start_html = None;
     let mut end_html = None;
@@ -66,14 +77,28 @@ fn parse_cf_html(bytes: &[u8]) -> Result<String> {
         bytes
     };
     // CF_HTML 偏移以字节计数；在选定范围转换 UTF-8，拒绝落在字符中间的偏移。
-    Ok(std::str::from_utf8(html)
+    let html = std::str::from_utf8(html)
         .context("剪贴板 HTML 偏移不在 UTF-8 字符边界")?
-        .to_owned())
+        .to_owned();
+    Ok(HtmlCapture { html, source_url })
+}
+
+/// `SourceURL` from the CF_HTML header only (before the first `<`).
+#[cfg(any(windows, test))]
+pub(crate) fn source_url_from_cf_html(data: &[u8]) -> Option<String> {
+    let head = String::from_utf8_lossy(&data[..data.len().min(4096)]);
+    head.split('<')
+        .next()?
+        .lines()
+        .find_map(|line| line.strip_prefix("SourceURL:"))
+        .map(str::trim)
+        .filter(|url| url.starts_with("http://") || url.starts_with("https://"))
+        .map(str::to_owned)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::parse_cf_html;
+    use super::{parse_cf_html, source_url_from_cf_html};
 
     fn payload(html: &str) -> (Vec<u8>, usize) {
         let header = "Version:1.0\r\nStartHTML:0000000000\r\nEndHTML:0000000000\r\n";
@@ -90,7 +115,7 @@ mod tests {
     fn preserves_unicode_and_rejects_partial_characters_and_invalid_ranges() {
         let html = "<p>中文😀</p>";
         let (bytes, start) = payload(html);
-        assert_eq!(parse_cf_html(&bytes).unwrap(), html);
+        assert_eq!(parse_cf_html(&bytes).unwrap().html, html);
         for (begin, end) in [
             (start + 4, start + html.len()),
             (start, start + 4),
@@ -121,8 +146,11 @@ mod tests {
             "Version:1.0\nStartHTML:-1\nEndHTML:-1\nStartFragment:{start:010}\nEndFragment:{:010}\n<b>片段</b>",
             start + "<b>片段</b>".len()
         );
-        assert_eq!(parse_cf_html(bytes.as_bytes()).unwrap(), "<b>片段</b>");
-        assert_eq!(parse_cf_html(b"<p>plain</p>\0").unwrap(), "<p>plain</p>");
+        assert_eq!(parse_cf_html(bytes.as_bytes()).unwrap().html, "<b>片段</b>");
+        assert_eq!(
+            parse_cf_html(b"<p>plain</p>\0").unwrap().html,
+            "<p>plain</p>"
+        );
         for bytes in [
             b"StartHTML:0\n<p>missing end</p>".as_slice(),
             b"StartHTML:nope\nEndHTML:20\n".as_slice(),
@@ -130,5 +158,42 @@ mod tests {
         ] {
             assert!(parse_cf_html(bytes).is_err());
         }
+    }
+
+    #[test]
+    fn header_source_url_ignores_body_and_non_http() {
+        assert_eq!(
+            source_url_from_cf_html(
+                b"Version:0.9\r\nStartHTML:0000000105\r\nSourceURL:https://example.com/a?b=1\r\n<html>SourceURL:https://wrong.example</html>"
+            ),
+            Some("https://example.com/a?b=1".into())
+        );
+        assert_eq!(
+            source_url_from_cf_html(b"Version:0.9\r\nSourceURL:about:blank\r\n<html>"),
+            None
+        );
+        assert_eq!(
+            source_url_from_cf_html(b"Version:0.9\r\n<html></html>"),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_cf_html_keeps_header_source_url() {
+        let body = "<p>x</p>";
+        let make = |start: usize, end: usize| {
+            format!(
+                "Version:0.9\r\nStartHTML:{start:010}\r\nEndHTML:{end:010}\r\nSourceURL:https://example.com/a?b=1\r\n"
+            )
+        };
+        let start = make(0, 0).len();
+        let header = make(start, start + body.len());
+        assert_eq!(header.len(), start);
+        let parsed = parse_cf_html(format!("{header}{body}").as_bytes()).unwrap();
+        assert_eq!(parsed.html, body);
+        assert_eq!(
+            parsed.source_url.as_deref(),
+            Some("https://example.com/a?b=1")
+        );
     }
 }

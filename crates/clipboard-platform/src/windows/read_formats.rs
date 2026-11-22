@@ -153,11 +153,11 @@ pub(super) fn read_clipboard(
         });
     }
     let mut source = source_app::clipboard_source();
-    let (content, warning) = read_content(clipboard, allowed)?;
-    // A page address says more than the browser's window title.
+    let (content, warning, source_url) = read_content(clipboard, allowed)?;
+    // Page URL from the same CF_HTML read beats a browser window title.
     if content.is_some()
         && let Some(source) = source.as_mut()
-        && let Some(url) = read_source_url()
+        && let Some(url) = source_url
     {
         source.detail = Some(url);
     }
@@ -174,14 +174,6 @@ pub(super) fn read_clipboard(
         extra,
         formats,
     })
-}
-
-fn read_source_url() -> Option<String> {
-    let _guard = clipboard_win::Clipboard::new_attempts(10).ok()?;
-    let format = clipboard_win::register_format("HTML Format")?;
-    let mut data = Vec::new();
-    clipboard_win::raw::get_vec(format.get(), &mut data).ok()?;
-    source_app::source_url_from_html(&data)
 }
 
 /// 额外格式枚举需要独立短会话；主读取（clipboard_rs）已关闭其会话，

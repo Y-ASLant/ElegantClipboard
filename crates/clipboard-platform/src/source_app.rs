@@ -70,14 +70,13 @@ pub fn running_apps(icons_dir: &Path) -> Vec<RunningApp> {
 pub fn clipboard_source() -> Option<SourceApp> {
     let owner = unsafe { GetClipboardOwner() }.ok();
     let foreground = unsafe { GetForegroundWindow() };
+    let foreground_source = process_name_for_window(foreground);
     let mut source = owner
         .and_then(process_name_for_window)
-        .or_else(|| process_name_for_window(foreground))?;
-    // The owner is often a hidden helper window; the document is named in the
-    // foreground title, which only counts when it belongs to the same program.
-    if process_name_for_window(foreground)
-        .is_some_and(|front| front.executable == source.executable)
-    {
+        .or_else(|| foreground_source.clone())?;
+    // Owner is often a hidden helper; the document name is on the foreground
+    // title, and only counts when that window is the same program.
+    if foreground_source.is_some_and(|front| front.executable == source.executable) {
         source.detail = window_title(foreground)
             .as_deref()
             .and_then(document_from_title);
@@ -99,18 +98,6 @@ fn document_from_title(title: &str) -> Option<String> {
         .min()?;
     let document = title[..end].trim().trim_start_matches(['*', '●']).trim();
     (!document.is_empty()).then(|| document.to_owned())
-}
-
-/// `SourceURL` from the header of a CF_HTML payload, as browsers write it.
-pub(crate) fn source_url_from_html(data: &[u8]) -> Option<String> {
-    let head = String::from_utf8_lossy(&data[..data.len().min(4096)]);
-    head.split('<')
-        .next()?
-        .lines()
-        .find_map(|line| line.strip_prefix("SourceURL:"))
-        .map(str::trim)
-        .filter(|url| url.starts_with("http://") || url.starts_with("https://"))
-        .map(str::to_owned)
 }
 
 /// Short process/app name for a paste target `(hwnd, pid)`, best-effort.
@@ -342,20 +329,6 @@ mod tests {
         );
         assert_eq!(document_from_title("Documents"), None);
         assert_eq!(document_from_title(" - Editor"), None);
-    }
-
-    #[test]
-    fn html_header_yields_only_a_web_source_url() {
-        let html = b"Version:0.9\r\nStartHTML:0000000105\r\nSourceURL:https://example.com/a?b=1\r\n<html>SourceURL:https://wrong.example</html>";
-        assert_eq!(
-            source_url_from_html(html),
-            Some("https://example.com/a?b=1".into())
-        );
-        assert_eq!(
-            source_url_from_html(b"Version:0.9\r\nSourceURL:about:blank\r\n<html>"),
-            None
-        );
-        assert_eq!(source_url_from_html(b"Version:0.9\r\n<html></html>"), None);
     }
 
     #[test]

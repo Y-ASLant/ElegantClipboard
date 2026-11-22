@@ -161,7 +161,7 @@ pub(super) fn rich_clipboard_matches(
     let html_matches = html.is_none_or(|expected| {
         crate::service::read_html::read_html(clipboard)
             .ok()
-            .is_some_and(|actual| actual.contains(expected))
+            .is_some_and(|actual| actual.html.contains(expected))
     });
     let rtf_matches = rtf.is_none_or(|expected| {
         clipboard

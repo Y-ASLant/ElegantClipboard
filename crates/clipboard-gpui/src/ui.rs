@@ -115,7 +115,8 @@ use crate::{
     options::Options,
     state::{
         HistoryReload, HistoryState, PreviewState, drag_edge_target_index, format_card_time,
-        next_drag_scroll_index, reorder_pixel_offsets, source_app_parts, toggle_batch_mark,
+        next_drag_scroll_index, reorder_pixel_offsets, source_app_parts, source_app_visible_name,
+        toggle_batch_mark,
     },
 };
 use clipboard_core::{

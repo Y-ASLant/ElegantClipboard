@@ -183,7 +183,7 @@ impl Worker {
                 if let Some(expected) = &expected_html {
                     crate::service::read_html::read_html(clipboard)
                         .ok()
-                        .is_some_and(|actual| actual.contains(expected.as_str()))
+                        .is_some_and(|actual| actual.html.contains(expected.as_str()))
                 } else {
                     // RTF 以 NUL 终止；写回与读回都可能带尾部 NUL，两侧都剥离后比对。
                     let expected = item

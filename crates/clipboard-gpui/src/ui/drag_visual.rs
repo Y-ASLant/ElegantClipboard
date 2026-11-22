@@ -80,12 +80,17 @@ impl HistoryCardSnapshot {
                             },
                         )
                         .when(show_source_name, |source| {
+                            let name = self
+                                .source_app_name
+                                .as_deref()
+                                .map(|name| source_app_visible_name(name, false).to_owned())
+                                .unwrap_or_default();
                             source.child(
                                 div()
                                     .min_w_0()
                                     .overflow_hidden()
                                     .text_ellipsis()
-                                    .child(self.source_app_name.clone().unwrap_or_default()),
+                                    .child(name),
                             )
                         }),
                 )

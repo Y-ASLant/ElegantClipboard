@@ -234,6 +234,31 @@ fn app_filter_changes_apply_to_observed_sources() -> Result<()> {
 }
 
 #[test]
+fn observed_capture_persists_source_detail_in_history_label() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+    next_snapshot(&events, 0);
+    service.send(Command::ObservedCapture {
+        content: CapturedClipboard::Text("detail label".into()),
+        source: Some(source_app::SourceApp {
+            name: "chrome".into(),
+            executable: None,
+            detail: Some("https://example.com/a".into()),
+        }),
+        extra: Vec::new(),
+        formats: Vec::new(),
+        deferred: false,
+        sequence: 0,
+    })?;
+    let items = next_snapshot(&events, 0);
+    assert_eq!(
+        items[0].source_app_name.as_deref(),
+        Some("chrome：https://example.com/a")
+    );
+    Ok(())
+}
+
+#[test]
 fn observed_captures_keep_the_source_with_each_record() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;

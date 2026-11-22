@@ -146,7 +146,7 @@ impl SettingsWindowView {
                                     toggle.id,
                                     toggle.label,
                                     toggle.selected,
-                                    hover_pending,
+                                    hover_pending || toggle.disabled,
                                     &self.owner,
                                     |owner| owner.hover_preference.value,
                                     move |next, checked| (toggle.set)(&mut next.details, checked),
@@ -165,76 +165,99 @@ struct DetailToggle {
     id: &'static str,
     label: &'static str,
     selected: bool,
+    disabled: bool,
     set: fn(&mut HoverPreviewDetails, bool),
+}
+
+fn detail_toggle(
+    id: &'static str,
+    label: &'static str,
+    selected: bool,
+    set: fn(&mut HoverPreviewDetails, bool),
+) -> DetailToggle {
+    DetailToggle {
+        id,
+        label,
+        selected,
+        disabled: false,
+        set,
+    }
 }
 
 fn detail_toggles(language: LanguagePreference, details: HoverPreviewDetails) -> Vec<DetailToggle> {
     vec![
+        detail_toggle(
+            "hover-detail-kind",
+            tr(language, "类型", "Type"),
+            details.kind,
+            |details, checked| details.kind = checked,
+        ),
+        detail_toggle(
+            "hover-detail-size",
+            tr(language, "存储大小", "Stored size"),
+            details.size,
+            |details, checked| details.size = checked,
+        ),
+        detail_toggle(
+            "hover-detail-resolution",
+            tr(language, "分辨率", "Resolution"),
+            details.resolution,
+            |details, checked| details.resolution = checked,
+        ),
+        detail_toggle(
+            "hover-detail-amount",
+            tr(language, "数量", "Counts"),
+            details.amount,
+            |details, checked| details.amount = checked,
+        ),
+        detail_toggle(
+            "hover-detail-name",
+            tr(language, "名称", "Name"),
+            details.name,
+            |details, checked| details.name = checked,
+        ),
+        detail_toggle(
+            "hover-detail-path",
+            tr(language, "路径", "Path"),
+            details.path,
+            |details, checked| details.path = checked,
+        ),
+        detail_toggle(
+            "hover-detail-extension",
+            tr(language, "扩展名", "Extension"),
+            details.extension,
+            |details, checked| details.extension = checked,
+        ),
+        detail_toggle(
+            "hover-detail-formats",
+            tr(language, "数据格式", "Data format"),
+            details.formats,
+            |details, checked| details.formats = checked,
+        ),
+        detail_toggle(
+            "hover-detail-source",
+            tr(language, "来源", "Source"),
+            details.source,
+            |details, checked| details.source = checked,
+        ),
         DetailToggle {
-            id: "hover-detail-kind",
-            label: tr(language, "类型", "Type"),
-            selected: details.kind,
-            set: |details, checked| details.kind = checked,
+            id: "hover-detail-source-url",
+            label: tr(language, "来源网址", "Source URL"),
+            selected: details.source_url,
+            disabled: !details.source,
+            set: |details, checked| details.source_url = checked,
         },
-        DetailToggle {
-            id: "hover-detail-size",
-            label: tr(language, "存储大小", "Stored size"),
-            selected: details.size,
-            set: |details, checked| details.size = checked,
-        },
-        DetailToggle {
-            id: "hover-detail-resolution",
-            label: tr(language, "分辨率", "Resolution"),
-            selected: details.resolution,
-            set: |details, checked| details.resolution = checked,
-        },
-        DetailToggle {
-            id: "hover-detail-amount",
-            label: tr(language, "数量", "Counts"),
-            selected: details.amount,
-            set: |details, checked| details.amount = checked,
-        },
-        DetailToggle {
-            id: "hover-detail-name",
-            label: tr(language, "名称", "Name"),
-            selected: details.name,
-            set: |details, checked| details.name = checked,
-        },
-        DetailToggle {
-            id: "hover-detail-path",
-            label: tr(language, "路径", "Path"),
-            selected: details.path,
-            set: |details, checked| details.path = checked,
-        },
-        DetailToggle {
-            id: "hover-detail-extension",
-            label: tr(language, "扩展名", "Extension"),
-            selected: details.extension,
-            set: |details, checked| details.extension = checked,
-        },
-        DetailToggle {
-            id: "hover-detail-formats",
-            label: tr(language, "数据格式", "Data format"),
-            selected: details.formats,
-            set: |details, checked| details.formats = checked,
-        },
-        DetailToggle {
-            id: "hover-detail-source",
-            label: tr(language, "来源", "Source"),
-            selected: details.source,
-            set: |details, checked| details.source = checked,
-        },
-        DetailToggle {
-            id: "hover-detail-time",
-            label: tr(language, "采集时间", "Captured at"),
-            selected: details.captured_at,
-            set: |details, checked| details.captured_at = checked,
-        },
-        DetailToggle {
-            id: "hover-detail-hint",
-            label: tr(language, "操作提示", "Hint"),
-            selected: details.hint,
-            set: |details, checked| details.hint = checked,
-        },
+        detail_toggle(
+            "hover-detail-time",
+            tr(language, "采集时间", "Captured at"),
+            details.captured_at,
+            |details, checked| details.captured_at = checked,
+        ),
+        detail_toggle(
+            "hover-detail-hint",
+            tr(language, "操作提示", "Hint"),
+            details.hint,
+            |details, checked| details.hint = checked,
+        ),
     ]
 }
