@@ -97,10 +97,9 @@ fn display_preferences_survive_restart_and_recover_invalid_values() -> Result<()
     let preferences = Preferences::new(&db);
     assert_eq!(preferences.display()?, DisplayPreference::default());
     let display = DisplayPreference {
-        show_category_filter: false,
         category_tabs: CategoryTabVisibility {
             all: true,
-            favorites: false,
+            favorites: true,
             text: true,
             image: true,
             url: false,
@@ -140,7 +139,6 @@ fn display_preferences_survive_restart_and_recover_invalid_values() -> Result<()
     assert_eq!(
         preferences.display()?,
         DisplayPreference {
-            show_category_filter: false,
             card_density: CardDensity::Compact,
             ..DisplayPreference::default()
         }
@@ -173,7 +171,6 @@ fn display_requires_all_and_favorites_when_the_filter_bar_is_shown() -> Result<(
     let db = Database::new(directory.path().join("clipboard.db"))?;
     let preferences = Preferences::new(&db);
     let none = DisplayPreference {
-        show_category_filter: true,
         category_tabs: CategoryTabVisibility {
             all: false,
             favorites: false,
@@ -188,7 +185,6 @@ fn display_requires_all_and_favorites_when_the_filter_bar_is_shown() -> Result<(
     assert!(preferences.set_display(none).is_err());
 
     let only_all = DisplayPreference {
-        show_category_filter: true,
         category_tabs: CategoryTabVisibility {
             all: true,
             favorites: false,
@@ -203,7 +199,6 @@ fn display_requires_all_and_favorites_when_the_filter_bar_is_shown() -> Result<(
     assert!(preferences.set_display(only_all).is_err());
 
     let favorites_off = DisplayPreference {
-        show_category_filter: true,
         category_tabs: CategoryTabVisibility {
             all: true,
             favorites: false,
@@ -217,7 +212,6 @@ fn display_requires_all_and_favorites_when_the_filter_bar_is_shown() -> Result<(
     assert!(!favorites_off.valid());
     assert!(preferences.set_display(favorites_off).is_err());
     let all_disabled = DisplayPreference {
-        show_category_filter: true,
         category_tabs: CategoryTabVisibility {
             all: false,
             favorites: true,
@@ -232,7 +226,6 @@ fn display_requires_all_and_favorites_when_the_filter_bar_is_shown() -> Result<(
     assert!(preferences.set_display(all_disabled).is_err());
 
     let minimal = DisplayPreference {
-        show_category_filter: true,
         category_tabs: CategoryTabVisibility {
             all: true,
             favorites: true,
@@ -259,7 +252,6 @@ fn stored_filter_bar_reopens_with_all_and_favorites_locked_on() -> Result<()> {
     )?;
     drop(db);
     let loaded = Preferences::new(&Database::new(path)?).display()?;
-    assert!(loaded.show_category_filter);
     assert!(
         loaded.category_tabs.all && loaded.category_tabs.favorites && loaded.category_tabs.text
     );

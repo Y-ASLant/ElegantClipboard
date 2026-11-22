@@ -152,34 +152,7 @@ impl ClipboardView {
             .flex()
             .items_center()
             .gap(px(visual::SPACE_2))
-            .when(self.display.value.show_category_filter, |row| {
-                row.child(self.render_category_filter(category_space, window, cx))
-            })
-            .when(
-                !self.display.value.show_category_filter && self.todo_preference.value.enabled,
-                |row| {
-                    row.child(
-                        Button::new("open-todos")
-                            .small()
-                            .h(px(visual::CONTROL_HEIGHT))
-                            .outline()
-                            .selected(self.todos_open)
-                            .label(tr(self.language, "备忘录", "Memo"))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                if this.todos_open {
-                                    let filter = if this.history.favorite_only() {
-                                        None
-                                    } else {
-                                        Some(this.history.category())
-                                    };
-                                    this.select_category(filter, window, cx);
-                                } else {
-                                    this.open_todos(window, cx);
-                                }
-                            })),
-                    )
-                },
-            )
+            .child(self.render_category_filter(category_space, window, cx))
             .when_some(group, |row, (width, trigger)| {
                 row.child(div().ml_auto().w(width).flex_none().child(trigger))
             })

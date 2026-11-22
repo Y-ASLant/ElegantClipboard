@@ -221,11 +221,11 @@ fn filter_change_rejects_previous_results() {
 }
 
 #[test]
-fn hiding_category_tabs_preserves_group_selection_and_resets_filters() -> anyhow::Result<()> {
+fn category_and_favorite_filters_preserve_group_selection() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let history = History::open(dir.path().join("history.db"))?;
-    let id = history.capture("selected entry")?.unwrap();
-    let group = history.create_group("Selected group")?;
+    let group = history.create_group("Work")?;
+    let id = history.capture("hello")?.unwrap();
     history.move_to_group(id, None, Some(group.id))?;
     let items = history.list_in_group("", PAGE_SIZE, false, Some(group.id))?;
     let mut state = HistoryState::default();
@@ -233,34 +233,24 @@ fn hiding_category_tabs_preserves_group_selection_and_resets_filters() -> anyhow
     super::settle(state.set_group(Some(group.id)));
     assert!(state.apply(items, 1, state.generation));
     assert_eq!(state.select_index(0), Some(0));
-    let group_generation = state.generation;
-    for _ in 0..2 {
-        assert!(!state.should_reset_category_filter(false));
-        assert_eq!(state.group_id(), Some(group.id));
-        assert_eq!(state.selected, Some(id));
-        assert_eq!(state.items.len(), 1);
-        assert_eq!(state.generation, group_generation);
-    }
+    assert_eq!(state.selected, Some(id));
+    assert_eq!(state.group_id(), Some(group.id));
 
     for category in [ContentCategory::Text, ContentCategory::Other] {
         super::settle(state.set_category(category));
-        assert!(!state.should_reset_category_filter(true));
         assert_eq!(state.category(), category);
-        assert!(state.should_reset_category_filter(false));
+        assert_eq!(state.group_id(), Some(group.id));
         super::settle(state.set_category(ContentCategory::All));
         assert_eq!(state.category(), ContentCategory::All);
         assert_eq!(state.group_id(), Some(group.id));
-        assert!(!state.should_reset_category_filter(false));
     }
 
     super::settle(state.set_favorite_filter(true));
-    assert!(!state.should_reset_category_filter(true));
     assert!(state.favorite_only());
-    assert!(state.should_reset_category_filter(false));
+    assert_eq!(state.group_id(), Some(group.id));
     super::settle(state.set_category(ContentCategory::All));
     assert!(!state.favorite_only());
     assert_eq!(state.group_id(), Some(group.id));
-    assert!(!state.should_reset_category_filter(false));
     Ok(())
 }
 

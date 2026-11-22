@@ -186,43 +186,30 @@ impl SettingsWindowView {
         let display_pending = owner_state.display.pending;
         // 分段条、数字框和复选框高度不同，各占一行；同一行只放同类复选框。
         settings_stack()
-            .child(settings_inline().child(pref_checkbox(
-                cx,
-                "show-category-filter",
-                tr(language, "显示分类筛选", "Show category filters"),
-                display.show_category_filter,
-                display_pending,
-                &self.owner,
-                |owner| owner.display.value,
-                |next: &mut DisplayPreference, checked| next.show_category_filter = checked,
-                ClipboardView::save_display,
-            )))
             .child(
                 settings_field_help(
                     tr(language, "分类筛选标签", "Category filter tabs"),
                     tr(
                         language,
-                        "与主窗口工具栏分段一致；「全部」和「收藏」始终显示。关闭上方“显示分类筛选”时隐藏整条分段。",
-                        "Matches the history toolbar tabs; “All” and “Favorites” always stay on. Turn off “Show category filters” above to hide the whole bar.",
+                        "与主窗口工具栏分段一致；「全部」和「收藏」始终显示。",
+                        "Matches the history toolbar tabs; “All” and “Favorites” always stay on.",
                     ),
                     "category-tabs-help",
                 )
-                    .child(settings_inline().children(
+                .child(
+                    settings_inline().children(
                         category_tab_flags(&display.category_tabs)
                             .into_iter()
                             .zip(CATEGORY_TAB_SPECS)
                             .enumerate()
                             .map(|(index, (selected, (filter, chinese, english, _)))| {
                                 let owner = self.owner.clone();
-                                let tabs_enabled =
-                                    display.show_category_filter && !display_pending;
                                 // Favorites is the `None` filter. Both it and All stay on.
-                                let locked =
-                                    matches!(filter, None | Some(ContentCategory::All));
+                                let locked = matches!(filter, None | Some(ContentCategory::All));
                                 settings_toggle(cx, Checkbox::new(("category-tab", index)))
                                     .label(tr(language, chinese, english))
                                     .checked(selected || locked)
-                                    .disabled(!tabs_enabled || locked)
+                                    .disabled(display_pending || locked)
                                     .on_change(move |checked, _, cx| {
                                         let _ = owner.update(cx, |owner, cx| {
                                             let mut next = owner.display.value;
@@ -235,7 +222,8 @@ impl SettingsWindowView {
                                         });
                                     })
                             }),
-                    )),
+                    ),
+                ),
             )
             .child(
                 settings_field(tr(language, "卡片密度", "Card density")).child(choice_tabs(
@@ -350,35 +338,33 @@ impl SettingsWindowView {
                 )),
             )
             .child(
-                settings_field(tr(language, "来源显示", "Source display")).child(
-                    choice_tabs(
-                        "source-app-display",
-                        &self.owner,
-                        [
-                            SourceAppDisplay::Both,
-                            SourceAppDisplay::Name,
-                            SourceAppDisplay::Icon,
-                        ],
-                        [
-                            tr(language, "名称和图标", "Name and icon"),
-                            tr(language, "仅名称", "Name only"),
-                            tr(language, "仅图标", "Icon only"),
-                        ],
-                        display.source_app_display,
-                        display_pending || !display.show_source_app,
-                        |owner| owner.display.value.source_app_display,
-                        |owner, mode, cx| {
-                            owner.save_display(
-                                DisplayPreference {
-                                    source_app_display: mode,
-                                    ..owner.display.value
-                                },
-                                cx,
-                            );
-                        },
-                        cx,
-                    ),
-                ),
+                settings_field(tr(language, "来源显示", "Source display")).child(choice_tabs(
+                    "source-app-display",
+                    &self.owner,
+                    [
+                        SourceAppDisplay::Both,
+                        SourceAppDisplay::Name,
+                        SourceAppDisplay::Icon,
+                    ],
+                    [
+                        tr(language, "名称和图标", "Name and icon"),
+                        tr(language, "仅名称", "Name only"),
+                        tr(language, "仅图标", "Icon only"),
+                    ],
+                    display.source_app_display,
+                    display_pending || !display.show_source_app,
+                    |owner| owner.display.value.source_app_display,
+                    |owner, mode, cx| {
+                        owner.save_display(
+                            DisplayPreference {
+                                source_app_display: mode,
+                                ..owner.display.value
+                            },
+                            cx,
+                        );
+                    },
+                    cx,
+                )),
             )
             .into_any_element()
     }

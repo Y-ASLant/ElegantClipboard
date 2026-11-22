@@ -313,11 +313,7 @@ impl ClipboardView {
             Ok(display) => {
                 self.display.value = display;
                 self.rebuild_rows_keeping_scroll();
-                if self
-                    .history
-                    .should_reset_category_filter(display.show_category_filter)
-                    || !self.active_category_tab_visible()
-                {
+                if !self.active_category_tab_visible() {
                     self.select_category(Some(ContentCategory::All), window, cx);
                 }
                 self.is_error = false;

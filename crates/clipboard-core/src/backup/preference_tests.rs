@@ -55,7 +55,6 @@ fn backup_roundtrips_all_non_default_preferences() -> Result<()> {
             ..HoverPreviewPreference::default()
         },
         display: DisplayPreference {
-            show_category_filter: false,
             category_tabs: CategoryTabVisibility::default(),
             card_density: CardDensity::Spacious,
             card_max_lines: 5,

@@ -263,10 +263,6 @@ impl HistoryState {
         self.group_id
     }
 
-    pub fn should_reset_category_filter(&self, show_category_filter: bool) -> bool {
-        !show_category_filter && (self.favorite_only() || self.category() != ContentCategory::All)
-    }
-
     /// `None` leaves generation and any in-flight snapshot untouched.
     fn set_filter(&mut self, filter: HistoryFilter) -> Option<HistoryReload> {
         if self.filter == filter {

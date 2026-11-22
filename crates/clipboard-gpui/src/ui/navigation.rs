@@ -340,9 +340,6 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.display.value.show_category_filter {
-            return;
-        }
         let tabs = self.toolbar_tabs();
         if let Some(&tab) = self
             .toolbar_tab_index(&tabs)

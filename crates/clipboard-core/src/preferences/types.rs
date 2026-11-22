@@ -338,7 +338,6 @@ impl CategoryTabVisibility {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DisplayPreference {
-    pub show_category_filter: bool,
     pub category_tabs: CategoryTabVisibility,
     pub card_density: CardDensity,
     pub card_max_lines: u8,
@@ -354,7 +353,6 @@ pub struct DisplayPreference {
 impl Default for DisplayPreference {
     fn default() -> Self {
         Self {
-            show_category_filter: true,
             category_tabs: CategoryTabVisibility::default(),
             card_density: CardDensity::Standard,
             card_max_lines: 2,
@@ -370,18 +368,15 @@ impl Default for DisplayPreference {
 }
 
 impl DisplayPreference {
-    /// Turns「全部」and「收藏」on when the filter bar is shown.
+    /// 「全部」and「收藏」stay on for the always-visible filter bar.
     pub fn with_locked_category_tabs(mut self) -> Self {
-        if self.show_category_filter {
-            self.category_tabs.all = true;
-            self.category_tabs.favorites = true;
-        }
+        self.category_tabs.all = true;
+        self.category_tabs.favorites = true;
         self
     }
 
     pub fn valid(self) -> bool {
-        (1..=10).contains(&self.card_max_lines)
-            && (!self.show_category_filter || self.category_tabs.valid_for_filter_bar())
+        (1..=10).contains(&self.card_max_lines) && self.category_tabs.valid_for_filter_bar()
     }
 }
 
