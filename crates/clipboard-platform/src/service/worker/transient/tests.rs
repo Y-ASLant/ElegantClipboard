@@ -37,17 +37,8 @@ fn delivered(outcomes: &[(PendingCapture, PollOutcome)]) -> usize {
 }
 
 #[test]
-fn disabled_window_delivers_immediately() {
-    let mut window = TransientWindow::new(false);
-    let now = Instant::now();
-    let immediate = window.push(entry(1, "text", now));
-    assert_eq!(immediate.len(), 1);
-    assert!(window.is_empty());
-}
-
-#[test]
 fn due_entry_with_unchanged_sequence_is_delivered() {
-    let mut window = TransientWindow::new(true);
+    let mut window = TransientWindow::new();
     let now = Instant::now();
     assert!(window.push(entry(7, "stable", now)).is_empty());
     let results = window.poll_due(now + TRANSIENT_WINDOW, 0, &mut || {
@@ -59,7 +50,7 @@ fn due_entry_with_unchanged_sequence_is_delivered() {
 
 #[test]
 fn unchanged_sequence_adopts_format_names_from_the_confirmation_read() {
-    let mut window = TransientWindow::new(true);
+    let mut window = TransientWindow::new();
     let now = Instant::now();
     let mut pending = entry(7, "stable", now);
     pending.formats.clear();
@@ -73,7 +64,7 @@ fn unchanged_sequence_adopts_format_names_from_the_confirmation_read() {
 
 #[test]
 fn replaced_by_empty_content_is_discarded() {
-    let mut window = TransientWindow::new(true);
+    let mut window = TransientWindow::new();
     let now = Instant::now();
     window.push(entry(7, "flash", now));
     // 序列号变化且当前剪贴板为空（划词工具还原）。
@@ -85,7 +76,7 @@ fn replaced_by_empty_content_is_discarded() {
 
 #[test]
 fn replaced_by_different_content_is_discarded() {
-    let mut window = TransientWindow::new(true);
+    let mut window = TransientWindow::new();
     let now = Instant::now();
     window.push(entry(7, "old", now));
     let results = window.poll_due(now + TRANSIENT_WINDOW, 0, &mut || {
@@ -97,7 +88,7 @@ fn replaced_by_different_content_is_discarded() {
 #[test]
 fn replaced_by_identical_content_uses_latest_formats_even_when_empty() {
     for formats in [vec!["replacement/native".into()], Vec::new()] {
-        let mut window = TransientWindow::new(true);
+        let mut window = TransientWindow::new();
         let now = Instant::now();
         window.push(entry(7, "same", now));
         let results = window.poll_due(now + TRANSIENT_WINDOW, 0, &mut || {
@@ -110,7 +101,7 @@ fn replaced_by_identical_content_uses_latest_formats_even_when_empty() {
 
 #[test]
 fn undecidable_replacement_keeps_the_entry() {
-    let mut window = TransientWindow::new(true);
+    let mut window = TransientWindow::new();
     let now = Instant::now();
     window.push(entry(7, "user copy", now));
     // 序列号变化、内容读为空但标记为不可判定（图片格式不可读）：不能当作被取代丢弃。
@@ -123,7 +114,7 @@ fn undecidable_replacement_keeps_the_entry() {
 
 #[test]
 fn replaced_by_own_paste_is_still_delivered() {
-    let mut window = TransientWindow::new(true);
+    let mut window = TransientWindow::new();
     let now = Instant::now();
     window.push(entry(7, "user copy", now));
     // 序列号 9 是自身写回（ignored_sequence=9）。
@@ -140,7 +131,7 @@ fn replaced_by_own_paste_is_still_delivered() {
 
 #[test]
 fn repeated_read_failures_eventually_discard() {
-    let mut window = TransientWindow::new(true);
+    let mut window = TransientWindow::new();
     let now = Instant::now();
     window.push(entry(7, "flaky", now));
     for round in 0..3u64 {
@@ -160,7 +151,7 @@ fn repeated_read_failures_eventually_discard() {
 
 #[test]
 fn overflow_flushes_oldest_entry() {
-    let mut window = TransientWindow::new(true);
+    let mut window = TransientWindow::new();
     let now = Instant::now();
     for sequence in 1..=MAX_PENDING as u32 {
         assert!(window.push(entry(sequence, "fill", now)).is_empty());
@@ -175,7 +166,7 @@ fn overflow_flushes_oldest_entry() {
 #[test]
 fn queued_captures_keep_their_own_sequence_and_only_the_final_content_survives() {
     let now = Instant::now();
-    let mut window = TransientWindow::new(true);
+    let mut window = TransientWindow::new();
     window.push(entry(101, "brief", now));
     window.push(entry(102, "final", now + Duration::from_millis(100)));
     let outcomes = window.poll_due(
@@ -192,7 +183,7 @@ fn queued_captures_keep_their_own_sequence_and_only_the_final_content_survives()
 
 #[test]
 fn drain_clears_all_pending() {
-    let mut window = TransientWindow::new(true);
+    let mut window = TransientWindow::new();
     let now = Instant::now();
     window.push(entry(1, "a", now));
     window.push(entry(2, "b", now));

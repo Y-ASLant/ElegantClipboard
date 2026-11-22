@@ -33,7 +33,6 @@ pub(crate) struct PendingCapture {
 /// 重读当前内容判定——为空（被还原）或不同（被取代）则丢弃，相同则照常入库。
 /// 被自身写回（粘贴回贴）取代的条目仍入库，避免「复制后立刻从本应用粘贴」丢数据。
 pub(crate) struct TransientWindow {
-    enabled: bool,
     pending: VecDeque<PendingCapture>,
 }
 
@@ -56,26 +55,18 @@ pub(crate) enum PollOutcome {
 pub(crate) type ConfirmationRead = (u32, Option<CapturedClipboard>, Vec<String>, bool);
 
 impl TransientWindow {
-    pub(crate) fn new(enabled: bool) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
-            enabled,
             pending: VecDeque::new(),
         }
-    }
-
-    pub(crate) fn set_enabled(&mut self, enabled: bool) {
-        self.enabled = enabled;
     }
 
     pub(crate) fn is_empty(&self) -> bool {
         self.pending.is_empty()
     }
 
-    /// 登记一条待确认采集；窗口关闭或溢出时立即返回应入库的条目。
+    /// 登记一条待确认采集；溢出时立即返回应入库的最旧条目。
     pub(crate) fn push(&mut self, entry: PendingCapture) -> Vec<PendingCapture> {
-        if !self.enabled {
-            return vec![entry];
-        }
         let mut immediate = Vec::new();
         while self.pending.len() >= MAX_PENDING {
             if let Some(oldest) = self.pending.pop_front() {

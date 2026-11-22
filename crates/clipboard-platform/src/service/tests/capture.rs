@@ -69,33 +69,6 @@ fn observed_capture_filter_distinguishes_url_and_preserves_allowed_rich_format()
 }
 
 #[test]
-fn disabled_transient_filter_still_refreshes_deferred_captures() -> Result<()> {
-    let directory = tempfile::tempdir()?;
-    let db = Database::new(directory.path().join("clipboard.db"))?;
-    Preferences::new(&db).set_transient_filter(false)?;
-    drop(db);
-    let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
-    next_snapshot(&events, 0);
-    service.send(Command::ObservedCapture {
-        content: CapturedClipboard::Text("deferred without filter".into()),
-        source: None,
-        extra: Vec::new(),
-        formats: vec!["CF_UNICODETEXT".into()],
-        deferred: true,
-        sequence: 17,
-    })?;
-    let items = next_snapshot(&events, 0);
-    assert_eq!(items.len(), 1);
-    assert_eq!(items[0].preview.as_deref(), Some("deferred without filter"));
-    assert_eq!(items[0].formats, ["CF_UNICODETEXT"]);
-    assert_eq!(
-        History::open(directory.path().join("clipboard.db"))?.count("", false)?,
-        1
-    );
-    Ok(())
-}
-
-#[test]
 fn monitor_types_change_applies_to_later_observed_captures() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;

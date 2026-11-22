@@ -24,7 +24,6 @@ const CARD_CORNER_KEY: &str = "gpui_card_corner";
 const LANGUAGE_KEY: &str = "gpui_language";
 const HOTKEY_KEY: &str = "gpui_hotkey";
 const CAPTURE_PAUSED_KEY: &str = "gpui_capture_paused";
-const TRANSIENT_FILTER_KEY: &str = "gpui_transient_filter";
 const WINDOW_SIZE_KEY: &str = "gpui_window_size";
 const PERSIST_WINDOW_SIZE_KEY: &str = "gpui_persist_window_size";
 const AUTO_RESET_STATE_KEY: &str = "gpui_auto_reset_state";
@@ -170,15 +169,6 @@ impl Preferences {
                 HotkeyPreference::Disabled => "disabled",
             },
         )?)
-    }
-
-    /// 瞬时内容确认窗口开关；缺省开启（旧行为的增强，减少划词/碎片噪声）。
-    pub fn transient_filter(&self) -> Result<bool> {
-        self.bool_pref(TRANSIENT_FILTER_KEY, true)
-    }
-
-    pub fn set_transient_filter(&self, enabled: bool) -> Result<()> {
-        self.set_bool_pref(TRANSIENT_FILTER_KEY, enabled)
     }
 
     /// 暂停状态特殊：`"false"` 或缺失值表示采集中，其余（含未知值）视为已暂停

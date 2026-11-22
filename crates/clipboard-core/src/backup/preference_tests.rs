@@ -86,7 +86,6 @@ fn backup_roundtrips_all_non_default_preferences() -> Result<()> {
             max_count: 500,
         },
         retention_saved: true,
-        transient_filter: false,
         monitor_types: MonitorTypesPreference {
             text: true,
             url: false,
@@ -142,7 +141,6 @@ fn backup_roundtrips_all_non_default_preferences() -> Result<()> {
     preferences.set_audio(expected.audio)?;
     preferences.set_todo_preference(expected.todo)?;
     history.save_retention(expected.retention, true, &dir.path().join("images"))?;
-    preferences.set_transient_filter(expected.transient_filter)?;
     preferences.set_monitor_types(expected.monitor_types)?;
     preferences.set_capture_formats(expected.capture_formats.clone())?;
     preferences.set_app_filter(&expected.app_filter)?;

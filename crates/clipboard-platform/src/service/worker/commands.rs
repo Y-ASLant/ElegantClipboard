@@ -372,9 +372,6 @@ impl Worker {
             Command::SetCaptureFormats(preference) => {
                 return self.handle_set_capture_formats(preference);
             }
-            Command::SetTransientFilter(enabled) => {
-                return self.handle_set_transient_filter(enabled);
-            }
             Command::SetDiagnosticsEnabled(enabled) => {
                 return self.save_setting(
                     enabled,

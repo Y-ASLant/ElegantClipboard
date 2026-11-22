@@ -1,35 +1,11 @@
 use super::settings_common::{
-    choice_tabs, command_checkbox, command_checkbox_help, owner_state, pref_checkbox,
-    settings_description, settings_field_help, settings_inline, settings_stack,
+    choice_tabs, command_checkbox_help, owner_state, pref_checkbox, settings_description,
+    settings_field_help, settings_inline, settings_stack,
 };
 use super::*;
 use gpui_kit::component::chart::BarChart;
 
 impl SettingsWindowView {
-    pub(super) fn settings_transient_filter_content(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(owner_state) = owner_state(&self.owner, cx) else {
-            return div().into_any_element();
-        };
-        let language = owner_state.language;
-        settings_stack()
-            .gap_2()
-            .child(command_checkbox(
-                cx,
-                "transient-filter",
-                tr(
-                    language,
-                    "过滤瞬时复制内容（推荐开启）",
-                    "Filter transient copies (recommended)",
-                ),
-                owner_state.transient_filter.value,
-                owner_state.transient_filter.pending,
-                &self.owner,
-                Command::SetTransientFilter,
-                |owner| owner.transient_filter.pending = true,
-            ))
-            .into_any_element()
-    }
-
     /// 去重策略与粘贴后恢复剪贴板（决策 0003）。
     pub(super) fn settings_dedup_content(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(owner_state) = owner_state(&self.owner, cx) else {

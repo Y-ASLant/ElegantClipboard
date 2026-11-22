@@ -44,7 +44,7 @@ cargo test -p ElegantClipboard --locked history_click_preserves -- --ignored --t
 
 复制历史记录时（Original 模式）额外格式随主格式写回剪贴板：富文本在单 guard 会话内按 text→html→rtf→extras 顺序写入；纯文本路径以独立 NoClear 会话追加；图片 Original 复制在打开剪贴板前生成 24 位 CF_DIB，单 guard 写 CF_DIB + PNG + CF_HDROP（内容寻址 `image_tmp/<hash>.png`），拖拽同样携带这份现成位图，image_tmp 在 worker 启动时清扫（超过 24 小时或 64 个）。
 
-监听采集（deferred=true）先进 300ms 瞬时确认窗口：到期时序列号未变或被自身写回取代则入库，重读为空或内容不同则丢弃，重读失败顺延 250ms 最多 3 轮；测试与 smoke 注入 deferred=false 绕过窗口；开关 `gpui_transient_filter` 默认开启，在数据设置页切换。
+监听采集（deferred=true）先进 300ms 瞬时确认窗口：到期时序列号未变或被自身写回取代则入库，重读为空或内容不同则丢弃，重读失败顺延 250ms 最多 3 轮；测试与 smoke 注入 deferred=false 绕过窗口；瞬时确认始终开启（无设置开关）。
 
 相同纯文本（text/url/html/rtf，默认分组）再次复制时合并进既有条目：补缺 html/rtf 列、仅 text 目标升级类型、byte_size 重算、置顶，并在 `content_hash_aliases` 记录别名；`touch_by_hash` 在默认分组作用域内解析别名。
 

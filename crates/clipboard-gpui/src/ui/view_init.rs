@@ -215,7 +215,6 @@ impl ClipboardView {
             service.initial_preferences.retention,
             service.initial_preferences.retention_saved,
         );
-        let transient_filter = service.initial_preferences.transient_filter;
         let diagnostics_enabled = service.initial_preferences.diagnostics_enabled;
         if let Some(diagnostics) = &startup.diagnostics {
             diagnostics.set_enabled(diagnostics_enabled);
@@ -466,7 +465,6 @@ impl ClipboardView {
             retention_saved,
             retention: PendingPref::new(retention),
             audio: PendingPref::new(audio),
-            transient_filter: PendingPref::new(transient_filter),
             diagnostics_enabled: PendingPref::new(diagnostics_enabled),
             diagnostics: startup.diagnostics.clone(),
             run_as_admin: PendingPref::new(run_as_admin),

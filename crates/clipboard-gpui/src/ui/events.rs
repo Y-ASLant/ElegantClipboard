@@ -269,7 +269,6 @@ impl ClipboardView {
             Event::TodoPreferenceSaved(result) => {
                 self.apply_todo_preference_saved(result, window, cx)
             }
-            Event::TransientFilterSaved(result) => self.apply_transient_filter_saved(result),
             Event::DiagnosticsEnabledSaved(result) => self.apply_diagnostics_enabled_saved(result),
             Event::RunAsAdminSaved(result) => self.apply_run_as_admin_saved(result),
             Event::UpdateChecked(result) => self.apply_update_checked(result),

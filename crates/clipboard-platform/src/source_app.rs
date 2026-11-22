@@ -383,8 +383,12 @@ mod tests {
 
     #[test]
     fn known_browser_executables_skip_window_title_documents() {
-        assert!(is_browser_executable(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"));
-        assert!(is_browser_executable(r"C:\Program Files\Google\Chrome\Application\chrome.exe"));
+        assert!(is_browser_executable(
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"
+        ));
+        assert!(is_browser_executable(
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+        ));
         assert!(!is_browser_executable(r"C:\Windows\System32\notepad.exe"));
     }
 

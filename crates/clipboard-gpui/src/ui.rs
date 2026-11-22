@@ -443,7 +443,6 @@ struct ClipboardView {
     audio: PendingPref<AudioPreference>,
     retention: PendingPref<clipboard_core::retention::RetentionPolicy>,
     retention_saved: bool,
-    transient_filter: PendingPref<bool>,
     diagnostics_enabled: PendingPref<bool>,
     diagnostics: Option<std::sync::Arc<crate::diagnostics::Diagnostics>>,
     run_as_admin: PendingPref<bool>,

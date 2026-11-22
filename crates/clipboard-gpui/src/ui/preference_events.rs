@@ -500,18 +500,6 @@ impl ClipboardView {
         );
         true
     }
-
-    pub(super) fn apply_transient_filter_saved(&mut self, result: Result<bool, String>) -> bool {
-        self.acknowledge_save(
-            result,
-            |this| &mut this.transient_filter,
-            (
-                "保存瞬时内容过滤设置失败",
-                "Failed to save transient filtering setting",
-            ),
-        );
-        true
-    }
 }
 
 #[cfg(test)]

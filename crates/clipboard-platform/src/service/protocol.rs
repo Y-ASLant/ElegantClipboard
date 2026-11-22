@@ -267,7 +267,6 @@ pub enum Command {
         /// 测试与 smoke 注入 false 直接入库。
         deferred: bool,
     },
-    SetTransientFilter(bool),
     /// 会话日志开关；panic.log 不受影响。
     SetDiagnosticsEnabled(bool),
     /// 以管理员身份启动；仅 Windows 生效。
@@ -452,7 +451,6 @@ pub enum Event {
     CornerRadiusSaved(Result<CornerRadiusPreference, String>),
     CardCornerSaved(Result<CardCornerPreference, String>),
     FontsSaved(Result<FontPreference, String>),
-    TransientFilterSaved(Result<bool, String>),
     DiagnosticsEnabledSaved(Result<bool, String>),
     RunAsAdminSaved(Result<bool, String>),
     UpdateChecked(Result<UpdateStatus, String>),

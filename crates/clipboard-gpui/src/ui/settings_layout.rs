@@ -155,14 +155,6 @@ const SECTIONS: &[Section] = &[
     },
     Section {
         page: SettingsPage::Data,
-        chinese: "瞬时内容过滤",
-        english: "Transient filtering",
-        description_chinese: "复制后 300ms 内被撤销或覆盖的内容（划词工具临时复制、表格单元格碎片）不再进入历史。复制后立即从本应用粘贴不受影响。",
-        description_english: "Content undone or replaced within 300ms of copying (selection-tool flashes, spreadsheet fragments) no longer enters history. Pasting from this app right after copying is unaffected.",
-        content: SettingsWindowView::settings_transient_filter_content,
-    },
-    Section {
-        page: SettingsPage::Data,
         chinese: "去重与剪贴板",
         english: "Deduplication",
         description_chinese: "",

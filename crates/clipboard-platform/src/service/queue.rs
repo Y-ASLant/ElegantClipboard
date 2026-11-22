@@ -297,7 +297,7 @@ mod tests {
                 byte_limit: 8,
                 ..Default::default()
             });
-            let mut window = TransientWindow::new(true);
+            let mut window = TransientWindow::new();
             queue.try_send(capture("12345678"))?;
             let (command, permit) = queue.recv_timeout(Duration::ZERO)?;
             let Command::ObservedCapture {

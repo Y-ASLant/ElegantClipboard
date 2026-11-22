@@ -79,7 +79,6 @@ impl Service {
         let stop = Arc::new(AtomicBool::new(false));
         let monitor_types = initial_preferences.monitor_types;
         let app_filter = initial_preferences.app_filter.clone();
-        let transient_filter = initial_preferences.transient_filter;
         let mut service = Self {
             commands: commands.clone(),
             stop: stop.clone(),
@@ -113,7 +112,7 @@ impl Service {
                     state: worker_state,
                     monitor_types,
                     app_filter,
-                    transient: super::worker::transient::TransientWindow::new(transient_filter),
+                    transient: super::worker::transient::TransientWindow::new(),
                     clipboard_stash: None,
                     search: String::new(),
                     favorite_only: false,
