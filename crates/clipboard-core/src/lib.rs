@@ -347,6 +347,7 @@ impl History {
             } else {
                 Some(limit.clamp(PAGE_SIZE, HISTORY_LIMIT))
             },
+            omit_text: true,
             ..Default::default()
         })?)
     }

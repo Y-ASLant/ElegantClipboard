@@ -14,7 +14,7 @@ pub use repository::*;
 pub use schema::*;
 
 use parking_lot::Mutex;
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::info;
@@ -98,6 +98,27 @@ impl Database {
         Self::backfill_categories(conn)?;
         Self::backfill_semantic_hashes(conn)?;
         Self::normalize_favorite_order(conn)?;
+        Self::rebuild_search_index_once(conn)?;
+        Ok(())
+    }
+
+    /// One-time FTS backfill. Later writes stay in sync through schema triggers.
+    fn rebuild_search_index_once(conn: &Connection) -> Result<(), rusqlite::Error> {
+        let done: Option<String> = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = '_migration_clipboard_fts'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if done.is_some() {
+            return Ok(());
+        }
+        conn.execute_batch("INSERT INTO clipboard_fts(clipboard_fts) VALUES('rebuild');")?;
+        conn.execute(
+            "INSERT INTO settings (key, value, updated_at) VALUES ('_migration_clipboard_fts', '1', datetime('now', 'localtime'))",
+            [],
+        )?;
         Ok(())
     }
 

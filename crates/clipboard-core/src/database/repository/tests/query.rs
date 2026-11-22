@@ -288,3 +288,96 @@ fn get_by_position() {
     );
     assert!(repo.get_by_id(pinned).is_err());
 }
+
+#[test]
+fn default_list_plan_uses_order_index() {
+    let (_dir, db) = temp_db();
+    let repo = ClipboardRepository::new(&db);
+    repo.insert(make_text_item("indexed")).unwrap();
+    let conn = db.read_connection();
+    let conn = conn.lock();
+    let mut statement = conn
+        .prepare(
+            "EXPLAIN QUERY PLAN SELECT id FROM clipboard_items \
+             INDEXED BY idx_clipboard_default_list \
+             WHERE group_id IS NULL \
+             ORDER BY is_pinned DESC, sort_order DESC, created_at DESC LIMIT 100",
+        )
+        .unwrap();
+    let details: Vec<String> = statement
+        .query_map([], |row| row.get(3))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert!(
+        details
+            .iter()
+            .any(|detail| detail.contains("idx_clipboard_default_list")),
+        "{details:?}"
+    );
+    assert!(
+        details.iter().all(|detail| !detail.contains("TEMP B-TREE")),
+        "{details:?}"
+    );
+}
+
+#[test]
+fn trigram_search_matches_folded_text_note_and_short_terms() {
+    let (_dir, db) = temp_db();
+    let repo = ClipboardRepository::new(&db);
+    let id = repo
+        .insert(make_text_item("Alpha 审计标记 audit-common tail"))
+        .unwrap();
+    repo.insert(make_text_item("unrelated")).unwrap();
+    db.write_connection()
+        .lock()
+        .execute(
+            "UPDATE clipboard_items SET note = 'unique-note-token' WHERE id = ?1",
+            params![id],
+        )
+        .unwrap();
+    let hits = |search: &str| {
+        repo.list(QueryOptions {
+            search: Some(search.to_owned()),
+            omit_text: true,
+            ..Default::default()
+        })
+        .unwrap()
+    };
+    assert_eq!(hits("audit-common")[0].id, id);
+    assert_eq!(hits("AUDIT-COMMON")[0].id, id);
+    assert_eq!(hits("审计标记")[0].id, id);
+    assert_eq!(hits("unique-note-token")[0].id, id);
+    assert!(hits("not-present-in-this-dataset").is_empty());
+    assert_eq!(hits("Al")[0].id, id);
+    assert!(hits("audit-common")[0].text_content.is_none());
+    repo.delete(id).unwrap();
+    assert!(hits("audit-common").is_empty());
+}
+
+#[test]
+fn omitted_search_excerpt_does_not_return_the_body() {
+    let (_dir, db) = temp_db();
+    let repo = ClipboardRepository::new(&db);
+    let mut item = make_text_item("preview only");
+    item.text_content = Some(format!("{}HIDDEN-TERM{}", "前".repeat(300), "尾"));
+    item.preview = Some("前前前".into());
+    item.byte_size = item.text_content.as_ref().unwrap().len() as i64;
+    repo.insert(item).unwrap();
+    let listed = repo
+        .list(QueryOptions {
+            search: Some("HIDDEN-TERM".into()),
+            omit_text: true,
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(listed.len(), 1);
+    assert!(listed[0].text_content.is_none());
+    assert!(
+        listed[0]
+            .preview
+            .as_deref()
+            .unwrap()
+            .contains("HIDDEN-TERM")
+    );
+}

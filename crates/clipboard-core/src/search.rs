@@ -39,6 +39,11 @@ pub fn search_highlight_ranges(text: &str, search: &str) -> Vec<Range<usize>> {
     matching_ranges(text, search, usize::MAX)
 }
 
+/// True when the saved preview does not already show the term.
+pub(crate) fn search_excerpt_needed(preview: &str, search: &str) -> bool {
+    matching_ranges(preview, search, 1).is_empty() && !search.trim().is_empty()
+}
+
 /// Show the first matching part of a full text record when its saved preview
 /// does not contain the term. Keep the match near the start of a two-line card.
 pub fn search_excerpt(full: &str, preview: &str, search: &str) -> Option<String> {

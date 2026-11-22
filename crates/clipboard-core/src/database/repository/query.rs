@@ -48,12 +48,35 @@ impl ClipboardRepository {
         })
         .param(index as i64);
         let sql = format!(
-            "SELECT id FROM clipboard_items{}{} LIMIT 1 OFFSET ?",
+            "SELECT id FROM clipboard_items{}{}{} LIMIT 1 OFFSET ?",
+            Self::order_index(&QueryOptions {
+                favorite_only,
+                group_id,
+                ..Default::default()
+            }),
             builder.where_clause(),
             Self::order_clause(favorite_only)
         );
         conn.query_row(&sql, params_from_iter(&builder.params), |row| row.get(0))
             .optional()
+    }
+
+    /// The planner prefers `idx_clipboard_group` and then sorts. These indexes already
+    /// match the list order, so non-search reads name them explicitly.
+    fn order_index(options: &QueryOptions) -> &'static str {
+        if options
+            .search
+            .as_ref()
+            .is_some_and(|search| !search.is_empty())
+        {
+            return "";
+        }
+        match (options.group_id, options.favorite_only) {
+            (None, false) => " INDEXED BY idx_clipboard_default_list",
+            (None, true) => " INDEXED BY idx_clipboard_favorite_default_list",
+            (Some(_), false) => " INDEXED BY idx_clipboard_group_list",
+            (Some(_), true) => " INDEXED BY idx_clipboard_favorite_group_list",
+        }
     }
 
     fn order_clause(favorite_only: bool) -> &'static str {
@@ -80,7 +103,7 @@ impl ClipboardRepository {
         let conn = self.read_conn.lock();
 
         let is_searching = options.search.as_ref().is_some_and(|s| !s.is_empty());
-        let columns = if is_searching {
+        let columns = if is_searching && !options.omit_text {
             Self::SEARCH_COLUMNS
         } else {
             Self::LIST_COLUMNS
@@ -88,7 +111,8 @@ impl ClipboardRepository {
 
         let mut builder = ConditionBuilder::filtered(&options);
         let mut sql = format!(
-            "SELECT {columns} FROM clipboard_items{}",
+            "SELECT {columns} FROM clipboard_items{}{}",
+            Self::order_index(&options),
             builder.where_clause()
         );
 
@@ -104,6 +128,11 @@ impl ClipboardRepository {
             .query_map(params_from_iter(&builder.params), Self::row_to_item)?
             .collect::<Result<Vec<_>, _>>()?;
         fill_formats(&conn, &mut items)?;
+        if options.omit_text
+            && let Some(search) = options.search.as_deref().filter(|s| !s.is_empty())
+        {
+            fill_search_excerpts(&conn, &mut items, search)?;
+        }
         Ok(items)
     }
 
@@ -188,6 +217,54 @@ fn fill_formats(
     for item in items {
         if let Some(item_names) = names.remove(&item.id) {
             item.formats = item_names;
+        }
+    }
+    Ok(())
+}
+
+/// Load bodies only for rows whose preview does not already show the term.
+fn fill_search_excerpts(
+    conn: &rusqlite::Connection,
+    items: &mut [ClipboardItem],
+    search: &str,
+) -> Result<(), rusqlite::Error> {
+    let needed: Vec<i64> = items
+        .iter()
+        .filter(|item| {
+            item.content_type != "image"
+                && crate::search::search_excerpt_needed(
+                    item.preview.as_deref().unwrap_or(""),
+                    search,
+                )
+        })
+        .map(|item| item.id)
+        .collect();
+    if needed.is_empty() {
+        return Ok(());
+    }
+    let ids = needed
+        .iter()
+        .map(i64::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut statement = conn.prepare(&format!(
+        "SELECT id, text_content FROM clipboard_items WHERE id IN ({ids})"
+    ))?;
+    let mut texts = std::collections::HashMap::<i64, String>::new();
+    let mut rows = statement.query([])?;
+    while let Some(row) = rows.next()? {
+        if let Some(text) = row.get::<_, Option<String>>(1)? {
+            texts.insert(row.get(0)?, text);
+        }
+    }
+    for item in items.iter_mut() {
+        let Some(full) = texts.remove(&item.id) else {
+            continue;
+        };
+        if let Some(excerpt) =
+            crate::search::search_excerpt(&full, item.preview.as_deref().unwrap_or(""), search)
+        {
+            item.preview = Some(excerpt);
         }
     }
     Ok(())

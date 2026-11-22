@@ -1,6 +1,6 @@
+mod png_thumb;
 #[cfg(test)]
 mod tests;
-
 use gpui_kit::{ImageCacheError, ImageSource, RenderImage};
 use image::{DynamicImage, Frame, ImageDecoder, ImageFormat, ImageReader};
 use std::{
@@ -249,13 +249,17 @@ fn decode_thumbnail(key: &ThumbnailKey) -> anyhow::Result<Option<Arc<RenderImage
         // Preserve GPUI's multi-frame decoding even with a misleading file extension.
         return Ok(None);
     }
-    if reader.format() == Some(ImageFormat::Png)
-        && image::codecs::png::PngDecoder::new(std::io::BufReader::new(std::fs::File::open(
+    if reader.format() == Some(ImageFormat::Png) {
+        if image::codecs::png::PngDecoder::new(std::io::BufReader::new(std::fs::File::open(
             &key.path,
         )?))?
         .is_apng()?
-    {
-        return Ok(None);
+        {
+            return Ok(None);
+        }
+        if let Some(image) = png_thumb::decode(&key.path, key.size)? {
+            return Ok(Some(image));
+        }
     }
     let mut limits = image::Limits::default();
     limits.max_alloc = Some(MAX_DECODE_BYTES);

@@ -83,8 +83,9 @@ pub struct QueryOptions {
     pub group_id: Option<i64>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
+    /// Display lists skip the body. Search excerpts are filled separately.
+    pub omit_text: bool,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Group {
     pub id: i64,
@@ -98,6 +99,20 @@ pub struct Group {
 pub struct ClipboardRepository {
     write_conn: Arc<Mutex<Connection>>,
     read_conn: Arc<Mutex<Connection>>,
+}
+
+/// Quote a trigram query so operators in the user's text stay literal.
+fn fts_query(search: &str) -> String {
+    let mut quoted = String::with_capacity(search.len() + 2);
+    quoted.push('"');
+    for ch in search.chars() {
+        if ch == '"' {
+            quoted.push('"');
+        }
+        quoted.push(ch);
+    }
+    quoted.push('"');
+    quoted
 }
 
 /// Dynamic SQL conditions and owned SQLite parameters.
@@ -114,7 +129,7 @@ impl ConditionBuilder {
         }
     }
 
-    /// Search uses the first parameter for both columns; add other filters afterward.
+    /// Search of 3+ characters uses the trigram index. Shorter terms stay on LIKE.
     fn filtered(options: &QueryOptions) -> Self {
         let mut builder = Self::new();
         if let Some(search) = options
@@ -122,20 +137,27 @@ impl ConditionBuilder {
             .as_deref()
             .filter(|search| !search.is_empty())
         {
-            let mut pattern = String::with_capacity(search.len() + 2);
-            pattern.push('%');
-            for ch in search.chars() {
-                if matches!(ch, '\\' | '%' | '_') {
-                    pattern.push('\\');
+            if search.chars().count() >= 3 {
+                builder = builder.condition_with_param(
+                    "id IN (SELECT rowid FROM clipboard_fts WHERE clipboard_fts MATCH ?)",
+                    fts_query(search),
+                );
+            } else {
+                let mut pattern = String::with_capacity(search.len() + 2);
+                pattern.push('%');
+                for ch in search.chars() {
+                    if matches!(ch, '\\' | '%' | '_') {
+                        pattern.push('\\');
+                    }
+                    pattern.push(ch);
                 }
-                pattern.push(ch);
+                pattern.push('%');
+                builder = builder.condition_with_param(
+                    "(text_content LIKE ?1 ESCAPE '\\' OR file_paths LIKE ?1 ESCAPE '\\' \
+                     OR note LIKE ?1 ESCAPE '\\')",
+                    pattern,
+                );
             }
-            pattern.push('%');
-            builder = builder.condition_with_param(
-                "(text_content LIKE ?1 ESCAPE '\\' OR file_paths LIKE ?1 ESCAPE '\\' \
-                 OR note LIKE ?1 ESCAPE '\\')",
-                pattern,
-            );
         }
         builder = builder.content_type(options.content_type.as_deref());
         if let Some(mask) = options.category_mask {

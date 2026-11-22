@@ -2,7 +2,7 @@ use super::*;
 use gpui_kit::ImageSource;
 use std::ops::Range;
 
-const IMAGE_RELEASE_DELAY: Duration = Duration::from_secs(30);
+const IMAGE_RELEASE_DELAY: Duration = Duration::from_secs(5);
 const IMAGE_PREFETCH_ROWS: usize = 4;
 
 fn image_cache_range(visible: Range<usize>, len: usize) -> Range<usize> {

@@ -122,6 +122,44 @@ CREATE INDEX IF NOT EXISTS idx_clipboard_group ON clipboard_items(group_id);
 -- 同文合并查找：默认分组内按纯文本内容精确匹配（部分索引限制在文本类与默认分组）。
 CREATE INDEX IF NOT EXISTS idx_clipboard_same_text
     ON clipboard_items(text_content) WHERE group_id IS NULL;
+-- 默认列表：WHERE group_id IS NULL ORDER BY is_pinned, sort_order, created_at LIMIT n
+CREATE INDEX IF NOT EXISTS idx_clipboard_default_list
+    ON clipboard_items (is_pinned DESC, sort_order DESC, created_at DESC)
+    WHERE group_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_clipboard_group_list
+    ON clipboard_items (group_id, is_pinned DESC, sort_order DESC, created_at DESC)
+    WHERE group_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_clipboard_favorite_default_list
+    ON clipboard_items (is_pinned DESC, favorite_order DESC, sort_order DESC, created_at DESC)
+    WHERE is_favorite = 1 AND group_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_clipboard_favorite_group_list
+    ON clipboard_items (group_id, is_pinned DESC, favorite_order DESC, sort_order DESC, created_at DESC)
+    WHERE is_favorite = 1 AND group_id IS NOT NULL;
+
+-- Substring search. Trigram keeps ASCII case-folding close to SQLite LIKE.
+-- Terms shorter than 3 characters stay on LIKE; trigram cannot match them.
+CREATE VIRTUAL TABLE IF NOT EXISTS clipboard_fts USING fts5(
+    text_content,
+    file_paths,
+    note,
+    content='clipboard_items',
+    content_rowid='id',
+    tokenize='trigram case_sensitive 0'
+);
+CREATE TRIGGER IF NOT EXISTS clipboard_fts_ai AFTER INSERT ON clipboard_items BEGIN
+    INSERT INTO clipboard_fts(rowid, text_content, file_paths, note)
+    VALUES (new.id, new.text_content, new.file_paths, new.note);
+END;
+CREATE TRIGGER IF NOT EXISTS clipboard_fts_ad AFTER DELETE ON clipboard_items BEGIN
+    INSERT INTO clipboard_fts(clipboard_fts, rowid, text_content, file_paths, note)
+    VALUES ('delete', old.id, old.text_content, old.file_paths, old.note);
+END;
+CREATE TRIGGER IF NOT EXISTS clipboard_fts_au AFTER UPDATE ON clipboard_items BEGIN
+    INSERT INTO clipboard_fts(clipboard_fts, rowid, text_content, file_paths, note)
+    VALUES ('delete', old.id, old.text_content, old.file_paths, old.note);
+    INSERT INTO clipboard_fts(rowid, text_content, file_paths, note)
+    VALUES (new.id, new.text_content, new.file_paths, new.note);
+END;
 
 -- User-authored tasks. Not clipboard history, so capture, paste, and retention ignore them.
 CREATE TABLE IF NOT EXISTS todos (
