@@ -166,8 +166,8 @@ impl SettingsWindowView {
         settings_stack()
             .child(settings_description(tr(
                 language,
-                "先选择来源文件，再选择空目标目录。不会覆盖、合并或切换当前数据；完成后可打开恢复的数据。旧版数据库仅复制记录，迁移附件请使用旧版 ZIP。",
-                "Select a source file, then an empty destination folder. Current data will not be overwritten, merged or switched. Open the restored data when ready. A legacy database copies records only; use a legacy ZIP to migrate attachments.",
+                "先选择来源文件，再选择空目标目录。不会覆盖、合并或切换当前数据。完成后可以预览恢复的数据，预览不记录剪贴板。旧版数据库仅复制记录，迁移附件请使用旧版 ZIP。",
+                "Select a source file, then an empty destination folder. Current data will not be overwritten, merged or switched. Previewing the restored data does not record the clipboard. A legacy database copies records only; use a legacy ZIP to migrate attachments.",
             ), cx))
             .child(
                 settings_inline().children(choices.into_iter().map(|(id, label, source)| {
@@ -182,12 +182,25 @@ impl SettingsWindowView {
                 content.child(settings_description(tr(language, "正在选择路径或恢复数据…", "Selecting paths or restoring data…"), cx))
             })
             .when_some(outcome, |content, outcome| {
+                let mut description = outcome.description(language);
+                let result = if outcome.is_incomplete() {
+                    description.push_str(tr(
+                        language,
+                        "。要找回缺失的附件，请将完整备份恢复到另一个空目录。",
+                        ". To recover the missing attachments, restore a complete backup into another empty folder.",
+                    ));
+                    Alert::warning("restore-incomplete", description)
+                        .title(tr(language, "恢复不完整", "Incomplete restore"))
+                        .into_any_element()
+                } else {
+                    settings_description(description, cx).into_any_element()
+                };
                 content
-                    .child(settings_description(outcome.description(language), cx))
+                    .child(result)
                     .child(
                         settings_inline().child(
                             Button::new("open-restored-data").outline().h(px(visual::CONTROL_HEIGHT))
-                                .label(tr(language, "打开恢复的数据", "Open restored data"))
+                                .label(tr(language, "预览恢复的数据", "Preview restored data"))
                                 .disabled(pending)
                                 .on_click(move |_, _, cx| {
                                     let _ = open_owner.update(cx, |owner, cx| owner.open_imported_data(cx));

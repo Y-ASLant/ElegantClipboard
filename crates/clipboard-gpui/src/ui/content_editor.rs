@@ -1,7 +1,7 @@
 use super::editor_window::{
-    CONTEXT, editor_title, markdown_preview_source, memo_kind_toggle, save_shortcut_label,
+    CONTEXT, CancelContentEditor, SaveContentEditor, editor_title, markdown_preview_source,
+    memo_kind_toggle, request_standalone_editor_close, save_shortcut_label,
 };
-use super::editor_window::{CancelContentEditor, SaveContentEditor};
 use super::*;
 use gpui_kit::component::input::{Editor, EditorState, Escape as EditorEscape};
 use gpui_kit::component::text::TextView;
@@ -61,8 +61,14 @@ impl ContentEditorWindow {
             return;
         }
         self.loaded = true;
-        self.editor
-            .update(cx, |editor, cx| editor.set_value(text, window, cx));
+        let original = self.editor.update(cx, |editor, cx| {
+            editor.set_value(text, window, cx);
+            editor.text().clone()
+        });
+        let input = self.editor.clone();
+        let _ = self.owner.update(cx, |owner, _| {
+            owner.editor_input = Some((input, original));
+        });
         cx.defer_in(window, |this, window, cx| {
             this.editor
                 .update(cx, |editor, cx| editor.focus(window, cx));
@@ -70,25 +76,26 @@ impl ContentEditorWindow {
     }
 
     fn cancel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // Cancel/Esc uses remove_window (no should_close); clear session first.
-        let closed = self
-            .owner
-            .update(cx, |owner, cx| owner.close_content_editor_from_window(cx))
-            .unwrap_or(true);
-        if closed {
-            window.remove_window();
-        }
+        request_standalone_editor_close(&self.owner, window, cx);
     }
 
     fn save(&mut self, cx: &mut Context<Self>) {
-        let text = self.editor.read(cx).value().to_string();
-        let _ = self.owner.update(cx, |owner, cx| {
+        if !self.loaded {
+            return;
+        }
+        let text = self.editor.read(cx).text().to_string();
+        let saving = self.owner.update(cx, |owner, cx| {
             if owner.todo_draft.is_some() {
                 owner.save_todo_editor(text, cx);
             } else {
                 owner.save_content_editor(text, cx);
             }
+            owner.editor_pending() || owner.todo_edit_saving
         });
+        if saving.unwrap_or(false) {
+            self.editor
+                .update(cx, |input, cx| input.set_readonly(true, cx));
+        }
     }
 
     fn title_bar(
@@ -99,7 +106,14 @@ impl ContentEditorWindow {
     ) -> TitleBar {
         let pinned = self.pinned;
         let preview = self.markdown_preview;
-        TitleBar::new().bg(cx.theme().sidebar).child(
+        let close_owner = self.owner.clone();
+        let title_bar =
+            TitleBar::new()
+                .bg(cx.theme().sidebar)
+                .on_close_window(move |_, window, cx| {
+                    request_standalone_editor_close(&close_owner, window, cx);
+                });
+        title_bar.child(
             div()
                 .w_full()
                 .flex()
@@ -164,7 +178,18 @@ impl Render for ContentEditorWindow {
         let Some(owner) = self.owner.upgrade() else {
             return unavailable_editor(self.language, cx);
         };
-        let (language, pending, ready, loading, rich, adding_todo, memo_kind, error, initial_text) = {
+        let (
+            language,
+            pending,
+            memo_busy,
+            ready,
+            loading,
+            rich,
+            adding_todo,
+            memo_kind,
+            error,
+            initial_text,
+        ) = {
             let view = owner.read(cx);
             let editing_todo = view.todo_draft.is_some();
             let memo_kind = view.todo_draft.as_ref().map(|draft| draft.kind);
@@ -190,6 +215,7 @@ impl Render for ContentEditorWindow {
             (
                 view.language,
                 view.editor_pending() || view.todo_edit_saving,
+                editing_todo && view.todos_pending,
                 editing_todo
                     || matches!(
                         view.editor.result,
@@ -318,7 +344,7 @@ impl Render for ContentEditorWindow {
                         memo_kind,
                         language,
                         self.owner.clone(),
-                        cx,
+                        pending,
                     ))
                     .child(
                         div()
@@ -342,7 +368,7 @@ impl Render for ContentEditorWindow {
                                     } else {
                                         tr(language, "保存", "Save")
                                     })
-                                    .disabled(!editable)
+                                    .disabled(!editable || memo_busy)
                                     .tooltip(save_shortcut_label())
                                     .on_click(move |_, _, cx| {
                                         let _ = save.update(cx, |view, cx| view.save(cx));

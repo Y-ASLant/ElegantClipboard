@@ -59,7 +59,8 @@ impl ClipboardView {
             image_too_large,
             file_info.and_then(|info| info.total_size),
         );
-        let selected = !self.batch_mode && self.history.selected == Some(id);
+        let focused = self.history.selected == Some(id);
+        let selected = focused && !self.batch_mode;
         let marked = self.selected_ids.contains(&id);
         let (preview_text, highlights) = if is_image {
             (String::new(), Vec::new())
@@ -133,9 +134,7 @@ impl ClipboardView {
         });
         let action_hover = hovered.clone();
         let is_hovered = hovered.read(cx).content || hovered.read(cx).actions;
-        let background = if card.selected {
-            cx.theme().list_active
-        } else if is_hovered {
+        let hover_background = if is_hovered {
             cx.theme().list_hover
         } else {
             cx.theme().colors.list
@@ -145,44 +144,36 @@ impl ClipboardView {
         let locate_color = cx.theme().primary;
         let border = if located {
             locate_color
-        } else if card.selected {
+        } else if focused {
             cx.theme().list_active_border
         } else {
             crate::design_system::container_border(cx)
         };
         let motion = gpui_kit::base::motion::Transition::new(crate::design_system::FAST)
             .easing(cx.theme().motion.easing_move.clone());
-        // Translucent color interpolation over the shared material canvas produces
-        // additive-alpha fringes. Keep surface changes immediate; actions still fade.
-        let surface_motion = if cx.theme().colors.list.a < 1. {
-            gpui_kit::base::motion::Transition::new(Duration::ZERO)
+        // Only hover interpolates. A selection may last just one key-repeat frame.
+        // Translucent surfaces still snap to avoid additive-alpha fringes.
+        let hover_background = if cx.theme().colors.list.a < 1. {
+            hover_background
         } else {
-            motion.clone()
+            let channel = if cx.theme().is_dark() {
+                "history-surface-dark"
+            } else {
+                "history-surface-light"
+            };
+            visual::transition_color(
+                ElementId::from((channel, id as usize)),
+                hover_background,
+                motion.clone(),
+                window,
+                cx,
+            )
         };
-        let surface_channel = if cx.theme().is_dark() {
-            "history-surface-dark"
+        let background = if card.selected {
+            cx.theme().list_active
         } else {
-            "history-surface-light"
+            hover_background
         };
-        let border_channel = if cx.theme().is_dark() {
-            "history-border-dark"
-        } else {
-            "history-border-light"
-        };
-        let background = visual::transition_color(
-            ElementId::from((surface_channel, id as usize)),
-            background,
-            surface_motion.clone(),
-            window,
-            cx,
-        );
-        let border = visual::transition_color(
-            ElementId::from((border_channel, id as usize)),
-            border,
-            surface_motion,
-            window,
-            cx,
-        );
         let action_opacity = gpui_kit::base::motion::transition(
             ElementId::from(("history-actions-opacity", id as usize)),
             if is_hovered && !self.card_drag_active(cx) {
@@ -194,7 +185,12 @@ impl ClipboardView {
             window,
             cx,
         );
-        let surface = card.surface(false, cx).bg(background).border_color(border);
+        // The corner is shared with the action bar; keep the title width fixed during hover.
+        let show_pin = self.batch_mode || action_opacity == 0.;
+        let surface = card
+            .surface(false, show_pin, None, cx)
+            .bg(background)
+            .border_color(border);
         let measured_size = Rc::new(Cell::new(size(px(0.), px(0.))));
         let drag_enabled = !self.reorder_pending && !self.history.loading && !self.batch_mode;
         let live_drag_source = self.card_drag_active(cx) && self.drag_source_id() == Some(id);
@@ -220,11 +216,6 @@ impl ClipboardView {
             .relative()
             .on_hover(cx.listener(move |this, is_hovered: &bool, window, cx| {
                 hovered.update(cx, |hovered, _| hovered.content = *is_hovered);
-                // 鼠标驱动的焦点：悬停进入即转移选中态，与键盘/点击同一目标。
-                // 拖拽与批量模式下 selection 不参与渲染与快捷键，保持不变。
-                if *is_hovered && !this.batch_mode && !cx.has_active_drag() {
-                    this.history.selected = Some(id);
-                }
                 this.set_hover_source(id, *is_hovered, window, cx);
                 cx.notify();
             }))
@@ -271,6 +262,7 @@ impl ClipboardView {
                     generation: self.history.generation,
                     card,
                     size: measured_size.clone(),
+                    favorite_drop: self.favorite_drop.clone(),
                     native_preview: false,
                 };
                 let row = row
@@ -278,7 +270,6 @@ impl ClipboardView {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _, _, cx| {
-                            this.close_history_menu(cx);
                             this.prepare_card_drag(id, cx);
                         }),
                     )
@@ -296,6 +287,7 @@ impl ClipboardView {
                                 window,
                                 cx,
                             );
+                            this.history_drag_uses_gpui = !preview.native_preview;
                             cx.notify();
                         });
                         cx.new(|_| preview)

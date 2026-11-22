@@ -378,8 +378,14 @@ impl Preferences {
     }
 
     pub fn display(&self) -> Result<DisplayPreference> {
-        self.read_json(DISPLAY_KEY, |preference: &DisplayPreference| {
-            preference.valid()
+        // Lock before `valid`: older rows may have「全部」or「收藏」off.
+        let preference = self
+            .read_json::<DisplayPreference>(DISPLAY_KEY, |_| true)?
+            .with_locked_category_tabs();
+        Ok(if preference.valid() {
+            preference
+        } else {
+            DisplayPreference::default()
         })
     }
 

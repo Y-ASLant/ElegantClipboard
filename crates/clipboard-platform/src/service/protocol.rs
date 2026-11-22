@@ -154,6 +154,10 @@ pub enum Command {
     ClearAllHistory,
     TogglePin(i64),
     ToggleFavorite(i64),
+    SetFavorite {
+        id: i64,
+        favorite: bool,
+    },
     Pause(bool),
     SetTheme(ThemePreference),
     SetThemeColor(ThemeColor),
@@ -311,6 +315,7 @@ pub enum FailureKind {
     ClearAllHistory,
     BatchDelete,
     EditText { id: i64, generation: u64 },
+    Todo,
     SaveAs(i64),
     DataSize,
     DatabaseMaintenance,
@@ -355,6 +360,12 @@ impl Command {
                 id: *id,
                 generation: *generation,
             }),
+            Self::ListTodos
+            | Self::AddTodo { .. }
+            | Self::SetTodoStatus { .. }
+            | Self::DeleteTodo(_)
+            | Self::UpdateTodo { .. }
+            | Self::ReorderTodo { .. } => Some(FailureKind::Todo),
             Self::Pause(_) => Some(FailureKind::Pause),
             Self::QueryDataSize => Some(FailureKind::DataSize),
             Self::QueryDailyCounts(_) => Some(FailureKind::Other),

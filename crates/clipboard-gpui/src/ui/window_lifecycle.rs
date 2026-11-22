@@ -72,13 +72,7 @@ impl ClipboardView {
             changed = true;
             // Save in flight: keep draft/id so the command result can still finish.
             if !self.editor_pending() && !self.todo_edit_saving {
-                let had_item = self.editor.id.take().is_some();
-                let had_todo = self.todo_draft.take().is_some();
-                if had_item {
-                    self.release_editor_session();
-                } else if had_todo {
-                    self.editor_error = None;
-                }
+                self.release_editor_session();
             }
         }
         if changed {
@@ -129,10 +123,7 @@ impl ClipboardView {
                                 cx.notify();
                             }
                         }
-                        TrayCommand::Quit => {
-                            this.exiting.set(true);
-                            cx.quit();
-                        }
+                        TrayCommand::Quit => this.request_app_exit(window, cx),
                     },
                 ) {
                     tracing::warn!(%error, "Tray event window update failed");
@@ -228,7 +219,7 @@ impl ClipboardView {
     }
 
     pub(super) fn hide_visible_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.card_drag_active(cx)
+        if (self.card_drag_active(cx) && !self.onboarding_visible())
             || self.paste_state.pending()
             || self.paste_state.merging()
             || self.batch_pending
@@ -294,22 +285,15 @@ impl ClipboardView {
         true
     }
 
-    pub(super) fn close_history_menu_from_press(
-        &mut self,
-        _: &MouseDownEvent,
-        _: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.close_history_menu(cx);
-    }
-
     pub(super) fn hide_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.card_drag_active(cx) {
+        if self.card_drag_active(cx) && !self.onboarding_visible() {
             return;
         }
-        // Independent editor/todo windows outlive the history panel (same as settings).
-        // Only dismiss in-main note/dialog editing that has no separate HWND.
-        if self.editor_window.is_none() && !self.close_editor(window, cx) {
+        // A standalone editor survives panel hiding. An in-panel note is only
+        // dismissed automatically when it is clean and not saving.
+        if self.note_original.is_some()
+            && (self.editor_draft_blocker(cx).is_some() || !self.close_editor(window, cx))
+        {
             return;
         }
         self.prepare_to_hide(window, cx);
@@ -326,6 +310,7 @@ impl ClipboardView {
         self.window_show_task = None;
         self.suspend_onboarding(cx);
         if self.onboarding_visible() {
+            self.cancel_onboarding_drag(window, cx);
             self.paste_state.set_target(None);
             return;
         }
@@ -347,7 +332,7 @@ impl ClipboardView {
     }
     /// 当前打开的覆盖层，按 Esc 关闭优先级排列（同时至多一层）。
     pub(super) fn active_overlay(&self) -> Option<Overlay> {
-        if self.editor.id.is_some() && self.editor_window.is_none() {
+        if self.note_original.is_some() {
             Some(Overlay::Editor)
         } else if let Some(kind) = self.confirmation {
             Some(Overlay::Confirmation(kind))
@@ -368,21 +353,18 @@ impl ClipboardView {
             return;
         }
         if self.onboarding_visible() {
+            self.dismiss_onboarding(window, cx);
             cx.stop_propagation();
             return;
         }
         self.close_hover_preview("dismiss", cx);
         if self.card_drag_active(cx) {
-            cx.stop_active_drag(window);
-            self.finish_external_drag(cx);
-            self.drop_target = None;
-            self.card_drag_direction = 0;
-            cx.notify();
+            self.cancel_card_drag(window, cx);
             return;
         }
         match self.active_overlay() {
             Some(Overlay::Editor) => {
-                self.close_editor(window, cx);
+                self.request_editor_close(true, window, cx);
             }
             Some(Overlay::Confirmation(kind)) => {
                 if self.cancel_confirmation(kind, cx) {
@@ -414,10 +396,17 @@ impl ClipboardView {
                 if self._tray.is_some() {
                     self.hide_window(window, cx);
                 } else {
-                    self.exiting.set(true);
-                    window.remove_window();
+                    self.request_app_exit(window, cx);
                 }
             }
+        }
+    }
+
+    pub(super) fn request_app_exit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.prepare_app_exit(cx) {
+            self.close_editor(window, cx);
+            self.exiting.set(true);
+            cx.quit();
         }
     }
 
@@ -425,6 +414,9 @@ impl ClipboardView {
     /// 设置走 worker 的异步命令在退出前可能来不及落库，因此这里直写数据库。
     #[cfg(windows)]
     pub(super) fn relaunch_as_admin(&mut self, cx: &mut Context<Self>) {
+        if !self.prepare_app_exit(cx) {
+            return;
+        }
         let save = || -> anyhow::Result<()> {
             let db = clipboard_core::database::Database::new(
                 self.service.data_dir.join("clipboard.db"),

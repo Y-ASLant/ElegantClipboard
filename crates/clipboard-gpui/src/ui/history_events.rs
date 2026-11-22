@@ -210,9 +210,6 @@ impl ClipboardView {
             Ok(outcome) => {
                 self.reset_selection();
                 self.group_move_id = None;
-                self.editor_save_pending = false;
-                self.note_save_pending = false;
-                self.close_editor(window, cx);
                 self.apply_cleanup_warning(outcome.cleanup_warning);
                 self.clear_all_error = None;
                 if let Some(handle) = self.settings_window {

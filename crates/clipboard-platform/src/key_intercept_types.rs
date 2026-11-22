@@ -7,9 +7,22 @@ pub enum InterceptedKey {
         control: bool,
         shift: bool,
     },
-    /// Text input: the window must take focus (IME needs it) before the queued
-    /// keys are replayed with `replay_pending_text`.
-    Text,
+    /// A printable key, which the UI may replay after taking focus for its IME.
+    Text(InterceptedText),
+}
+
+/// A printable key captured before the history window takes native focus.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InterceptedText {
+    pub(crate) keycode: u16,
+    #[cfg(windows)]
+    pub(crate) scan_code: u16,
+    #[cfg(windows)]
+    pub(crate) extended: bool,
+    /// Whether this is Space with no shortcut modifiers.
+    pub unmodified_space: bool,
+    /// Whether the key is an auto-repeat of an already pressed key.
+    pub is_held: bool,
 }
 
 /// Navigation keys forwarded without focus, as GPUI key names.

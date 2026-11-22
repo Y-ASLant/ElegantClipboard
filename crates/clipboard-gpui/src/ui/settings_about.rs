@@ -3,6 +3,7 @@ use super::update_events::UpdateCheck;
 use super::*;
 use gpui_kit::component::alert::Alert;
 use gpui_kit::component::link::Link;
+use gpui_kit::component::notification::Notification;
 
 /// External project links: shared layout; expands at call sites so `cx` borrows match `Link`/`Button` rows.
 macro_rules! about_external_link {
@@ -133,6 +134,7 @@ impl SettingsWindowView {
                 #[cfg(windows)]
                 Some(UpdateCheck::Checking) => Some(tr(language, "检查中…", "Checking…")),
                 Some(UpdateCheck::Downloading) => Some(tr(language, "下载中…", "Downloading…")),
+                Some(UpdateCheck::Installing) => Some(tr(language, "安装中…", "Installing…")),
                 Some(UpdateCheck::UpToDate) => Some(tr(language, "已是最新", "Up to date")),
                 _ => None,
             };
@@ -235,6 +237,17 @@ impl SettingsWindowView {
                 ProjectLink::Issues,
             ),
             update_row,
+            row(
+                IconName::FileText,
+                tr(language, "使用引导", "Getting started").into(),
+                Button::new("about-reopen-guide")
+                    .outline()
+                    .h(px(visual::CONTROL_HEIGHT_COMPACT))
+                    .flex_shrink_0()
+                    .label(tr(language, "重新打开引导", "Reopen guide"))
+                    .on_click(cx.listener(|this, _, window, cx| this.reopen_guide(window, cx)))
+                    .into_any_element(),
+            ),
         ]);
 
         settings_stack()
@@ -244,5 +257,29 @@ impl SettingsWindowView {
                 panel.child(Alert::error("about-link-error", error).small())
             })
             .into_any_element()
+    }
+
+    fn reopen_guide(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(owner) = self.owner.upgrade() else {
+            return;
+        };
+        let main_window = owner.read(cx).main_window;
+        match main_window.update(cx, |_, window, cx| {
+            owner.update(cx, |view, cx| view.open_onboarding(window, cx))
+        }) {
+            Ok(Ok(())) => window.remove_window(),
+            Ok(Err(message)) => window.push_notification(Notification::warning(message), cx),
+            Err(error) => {
+                tracing::warn!(%error, "Could not open the onboarding guide");
+                window.push_notification(
+                    Notification::error(tr(
+                        self.language,
+                        "无法打开引导",
+                        "Could not open the guide",
+                    )),
+                    cx,
+                );
+            }
+        }
     }
 }

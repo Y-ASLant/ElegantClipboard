@@ -64,7 +64,7 @@ impl ClipboardView {
         self.save_pending(
             |this| &mut this.display,
             true,
-            display,
+            display.with_locked_category_tabs(),
             Command::SetDisplay,
             cx,
         );
@@ -355,6 +355,8 @@ impl ClipboardView {
                 Some(self.history.category())
             };
             self.select_category(filter, window, cx);
+        } else if self.todos_open {
+            self.sync_todo_layout(window, cx);
         }
         true
     }
@@ -459,7 +461,6 @@ impl ClipboardView {
         self.onboarding_pending = false;
         match result {
             Ok(()) => {
-                self.onboarding_completed = true;
                 self.is_error = false;
                 self.leave_onboarding(window, cx);
             }

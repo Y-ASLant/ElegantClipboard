@@ -218,6 +218,7 @@ fn image_drop_offers_a_retained_png_copy_before_bitmap_bytes() -> Result<()> {
 #[test]
 fn escape_release_and_source_reentry_have_distinct_drag_transitions() {
     let source = source::DragSource {
+        foreground: HWND::default(),
         rect: RECT {
             left: 0,
             top: 0,

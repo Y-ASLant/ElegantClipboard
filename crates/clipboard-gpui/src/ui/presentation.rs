@@ -124,6 +124,8 @@ pub(super) fn localize_service_message(language: LanguagePreference, message: St
         }
         "已在资源管理器中定位" => "Located in file manager".into(),
         "已打开数据目录" => "Data folder opened".into(),
+        "已添加到收藏" => "Added to favorites".into(),
+        "已取消收藏" => "Removed from favorites".into(),
         "路径已复制，可切换到目标应用按 Ctrl+V 粘贴" => {
             "Paths copied; switch to the target app and press Ctrl+V".into()
         }

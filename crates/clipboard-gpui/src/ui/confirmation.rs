@@ -33,11 +33,24 @@ impl ClipboardView {
 }
 
 impl ClipboardView {
-    pub(super) fn clear_history(&mut self, cx: &mut Context<Self>) {
+    fn clear_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if (!self.confirmation_active(HistoryConfirmation::ClearHistory(self.history.group_id()))
             && !self.skip_clear_confirm.value)
             || self.clear_pending
         {
+            return;
+        }
+        // The worker clears the whole group, not just visible search results.
+        let affects_editor = self.editor.id.is_some_and(|id| {
+            self.history
+                .items
+                .iter()
+                .find(|item| item.id == id)
+                .is_none_or(|item| {
+                    item.group_id == self.history.group_id() && !item.is_pinned && !item.is_favorite
+                })
+        });
+        if !self.close_history_editor_for_action(affects_editor, window, cx) {
             return;
         }
         if self.send(
@@ -49,11 +62,27 @@ impl ClipboardView {
         ) {
             self.clear_pending = true;
             cx.notify();
+        } else if self.confirmation
+            == Some(HistoryConfirmation::ClearHistory(self.history.group_id()))
+        {
+            self.confirmation_error = Some(self.message.clone());
         }
     }
 
     pub(super) fn clear_all_history(&mut self, cx: &mut Context<Self>) {
-        if self.clear_all_pending {
+        let owner = cx.weak_entity();
+        let main = self.main_window;
+        cx.defer(move |cx| {
+            let _ = main.update(cx, |_, window, cx| {
+                let _ = owner.update(cx, |view, cx| view.confirm_clear_all_history(window, cx));
+            });
+        });
+    }
+
+    fn confirm_clear_all_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.clear_all_pending
+            || !self.close_history_editor_for_action(self.editor.id.is_some(), window, cx)
+        {
             return;
         }
         self.clear_all_error = None;
@@ -99,6 +128,22 @@ impl ClipboardView {
         true
     }
 
+    fn close_history_editor_for_action(
+        &mut self,
+        affects_editor: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !affects_editor {
+            return true;
+        }
+        if let Some(message) = self.editor_draft_blocker(cx) {
+            self.reveal_editor(message, cx);
+            return false;
+        }
+        self.close_editor(window, cx)
+    }
+
     pub(super) fn confirm_history_action(
         &mut self,
         kind: HistoryConfirmation,
@@ -113,18 +158,24 @@ impl ClipboardView {
         }
         match kind {
             HistoryConfirmation::DeleteGroup(_) => self.delete_group(cx),
-            HistoryConfirmation::ClearHistory(_) => self.clear_history(cx),
-            HistoryConfirmation::DeleteSelected => self.delete_selected(cx),
+            HistoryConfirmation::ClearHistory(_) => self.clear_history(window, cx),
+            HistoryConfirmation::DeleteSelected => {
+                let affects_editor = self
+                    .editor
+                    .id
+                    .is_some_and(|id| self.selected_ids.contains(&id));
+                if !self.close_history_editor_for_action(affects_editor, window, cx) {
+                    return;
+                }
+                self.delete_selected(cx);
+            }
             HistoryConfirmation::DeleteOne(id) => {
+                if !self.close_history_editor_for_action(self.editor.id == Some(id), window, cx) {
+                    return;
+                }
                 self.send(Command::Delete(id), cx);
                 self.close_history_confirmation(window, cx);
             }
-        }
-        if matches!(kind, HistoryConfirmation::ClearHistory(_))
-            && !self.clear_pending
-            && self.is_error
-        {
-            self.confirmation_error = Some(self.message.clone());
         }
         window.refresh();
     }
@@ -155,7 +206,7 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.confirmation == Some(kind) || !self.close_editor(window, cx) {
+        if self.confirmation == Some(kind) || !self.dismiss_note_for_dialog(window, cx) {
             return;
         }
         self.close_history_confirmation(window, cx);
@@ -305,17 +356,17 @@ impl ClipboardView {
         {
             return;
         }
+        if !self.dismiss_note_for_dialog(window, cx) {
+            return;
+        }
         self.reset_selection();
         self.group_editor_open = false;
         self.group_rename_id = None;
         self.group_move_id = None;
-        if !self.close_editor(window, cx) {
-            return;
-        }
         window.focus(&self.list_focus, cx);
         if self.skip_clear_confirm.value {
             self.close_history_confirmation(window, cx);
-            self.clear_history(cx);
+            self.clear_history(window, cx);
         } else {
             self.open_history_confirmation(
                 HistoryConfirmation::ClearHistory(self.history.group_id()),

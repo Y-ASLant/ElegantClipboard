@@ -28,10 +28,15 @@
 
 依赖方向为 `clipboard-gpui -> clipboard-platform -> clipboard-core`，GPUI 可以直接调用核心层。业务校验、SQLite 和备份格式属于核心层；共享服务协议、剪贴板线程及各系统原生 API 属于平台层；窗口、托盘、交互状态和 GPUI Kit 组件属于界面层。
 
-- 单个 `.rs` 文件最多 **640 物理行**，空行、注释、示例与测试均计入；Cargo.lock、文档和生成的构建产物不属于源码行数限制。拆分按职责内聚优先，640 行是兜底上限而非拆分依据；超过 550 行的文件只产生告警，便于把拆分放进独立提交。
-- 同一类型可在职责明确的私有子模块中分别实现方法；跨模块可见性只开放到实际需要的父模块，不为了拆文件扩大 crate 公共 API。
-- 测试与对应业务模块就近组织，共用必要的隔离 fixture；不按行号编号分片，不用 `include!` 将大文件藏在外部文本中。
-- `scripts/check-source-size.ps1` 是唯一的行数上限检查入口，`just check` 和 `.github/workflows/gpui.yml` 都会调用。直接运行 `cargo check` 不包含该结构检查。
+- 单个 `.rs` 文件最多 **640** 物理行（空行、注释、示例与测试均计入）；Cargo.lock、文档和构建产物不计入。`scripts/check-source-size.ps1` 是唯一检查入口（`$maximumLines = 640`，默认 `$WarnAt = 560`），由 `just check` 与 `.github/workflows/gpui.yml` 调用；纯 `cargo check` 不含此项。
+- **拆分按职责内聚**，640 是 CI 硬兜底而非目标尺寸或均分依据。仓库总行数无上限。
+- 行数信号与 PR 边界：
+  - **< 560**：功能 PR 不顺手拆无关文件。
+  - **560–640**（脚本 `Write-Warning`，不 fail）：下一功能前先开独立 refactor PR 按职责切开；禁止在功能 diff 里夹带无关拆分。
+  - **将 > 640**：同 PR 必须先拆到职责边界，否则 CI 失败。
+- 拆分粒度：一个模块一个变化理由（协议 / 渲染 / 事件 / 测试夹具等）。同一类型可在职责明确的私有子模块中分别实现方法；跨模块可见性只开放到实际需要的父模块，**不为拆文件扩大 `pub` 或 crate 公共 API**。
+- 反模式：按行数均分或编号分片（`foo_1.rs`）；用 `include!` 把大文件藏进外部文本；仅为过线把测试挪到无关目录；预拆仍在共同演化、尚无稳定边界的逻辑。
+- 测试与对应业务模块就近组织，共用必要的隔离 fixture。
 - 删除代码前确认生产调用、测试用途、资源引用及兼容导入路径。历史验收记录不是死代码，不因重构删除；旧数据库和 ZIP 导入仍是受支持功能。
 
 结构检查命令：
@@ -105,7 +110,8 @@ GPUI 原生分派在 `main.rs` 按目标选择 `windows/` 或 `unix/`；Unix 的
 | `shortcuts`、`shortcut_labels`、`paste_actions`、`storage`、`data_import` | 快捷键注册与显示、受控粘贴、数据占用与恢复到独立目录 |
 | `paste_coordinator`、`paste_requests`、`paste_delivery`、`sequence` | 私有粘贴状态、请求代次、原生投递及序列适配；序列队列与单条投递并存，投递阶段由 `wait` 是否已消费区分 |
 | `image_assets`、`thumbnail_cache` | 可见范围图片资源、后台缩略图与纹理生命周期 |
-| `onboarding`、`onboarding_shortcut`、`onboarding_practice`、`onboarding_preferences`、`content`、`presentation` | 首次引导导航、快捷键配置、隔离练习教程与初始偏好、内容展示助手、主题及本地化展示 |
+| `onboarding`、`onboarding_shortcut`、`onboarding_practice`、`onboarding_favorites`、`onboarding_preferences` | 首次引导的步骤与导航、真实快捷键配置、隔离的搜索粘贴及拖拽收藏练习、初始偏好 |
+| `favorite_drop`、`content`、`presentation` | 主列表与引导共用的收藏落点、主界面内容布局、主题及本地化展示 |
 
 纯状态算法仍在 `state.rs`，对应行为测试在 `state/tests.rs`；UI 专属布局、拖拽和预览测试保留在其所属子模块。`ui/thumbnail_cache.rs` 负责列表缩略图的后台解码、两任务并发限制、外部文件版本和过期结果校验；`ui/image_assets.rs` 将其与可见范围、拖动引用和纹理回收衔接，原始图片仍用于悬停预览与复制。
 

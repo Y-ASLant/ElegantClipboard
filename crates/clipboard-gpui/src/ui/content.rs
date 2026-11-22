@@ -7,12 +7,19 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if self.onboarding_visible() {
+            self.favorite_drop.bounds.set(None);
             return self.render_onboarding(window, cx).into_any_element();
         }
         let chrome = self.list_chrome.clone();
         // GPUI's cached replay omits semantic nodes; rebuild for connected accessibility clients.
         let cache_subtrees = !window.is_a11y_active();
-        let height = chrome.read(cx).height.get().filter(|_| cache_subtrees);
+        // During a history drag, refresh the drop geometry and visual state rather than
+        // replaying a previous prepaint (whose canvas would not run).
+        let height = chrome
+            .read(cx)
+            .height
+            .get()
+            .filter(|_| cache_subtrees && !self.favorite_history_drag_active(cx));
         div()
             .key_context("ClipboardApp")
             .flex()
@@ -21,14 +28,6 @@ impl ClipboardView {
             .on_action(cx.listener(|this, _: &DismissOrHide, window, cx| {
                 this.dismiss_or_hide(window, cx);
             }))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(ClipboardView::close_history_menu_from_press),
-            )
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(ClipboardView::close_history_menu_from_press),
-            )
             .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
                 this.focus_search_for_input(window, cx);
             }))
@@ -97,7 +96,7 @@ impl ClipboardView {
                     .px(px(PAGE_PADDING))
                     .pb(px(visual::SPACE_2))
                     .flex_none()
-                    // One chrome slot: filter tabs, or batch / move / locate — never stacked.
+                    // Filters, mode controls, and the drag target share one row.
                     .child(self.render_toolbar_slot(window, cx)),
             )
             .into_any_element()
@@ -105,6 +104,7 @@ impl ClipboardView {
 
     /// Filter row or a transient mode strip. Modes replace tabs; they do not stack under them.
     fn render_toolbar_slot(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        self.favorite_drop.bounds.set(None);
         if self.batch_mode {
             return visual::reveal(
                 self.render_batch_strip(window, cx),
@@ -125,6 +125,17 @@ impl ClipboardView {
         if let Some((position, total)) = self.locate_progress().filter(|(_, total)| *total > 1) {
             return self
                 .render_locate_strip(position, total, cx)
+                .into_any_element();
+        }
+        if !self.todos_open && self.favorite_history_drag_active(cx) {
+            return self
+                .favorite_drop
+                .strip(self.language, self.history.favorite_only(), cx)
+                .on_drop(cx.listener(|this, drag: &HistoryDrag, window, cx| {
+                    if this.external_drag.is_none() {
+                        this.drop_history_favorite_at(drag, window.mouse_position(), cx);
+                    }
+                }))
                 .into_any_element();
         }
         self.render_filter_toolbar(window, cx).into_any_element()

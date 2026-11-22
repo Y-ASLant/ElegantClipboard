@@ -17,14 +17,14 @@ impl SettingsWindowView {
         let language_pending = owner_state.language_pending;
         let theme = owner_state.theme;
         let theme_pending = owner_state.theme_pending;
-        let theme_color = owner_state.theme_color;
-        let theme_color_pending = owner_state.theme_color_pending;
         let corner_radius = owner_state.corner_radius;
         let card_corner = owner_state.card_corner;
         let legacy_radius = match corner_radius.value {
             CornerRadiusPreference::Fixed(value) if ![0, 4, 16].contains(&value) => Some(value),
             _ => None,
         };
+        let theme_colors =
+            owner_state.theme_color_tabs("settings-theme-color", &self.owner, false, cx);
         // 三类语义各一行：语言/主题/主题色，圆角系三项，字体组独占整行；
         // 混排同一 wrap 行会随宽度换行出孤列且控件节奏不同。
         settings_stack()
@@ -84,32 +84,7 @@ impl SettingsWindowView {
                             ),
                             "theme-color-help",
                         )
-                        .child(choice_tabs(
-                            "settings-theme-color",
-                            &self.owner,
-                            [
-                                ThemeColor::VibrantOrange,
-                                ThemeColor::Cyan,
-                                ThemeColor::GoogleBlue,
-                                ThemeColor::Rouge,
-                            ],
-                            [
-                                tr(language, "赭石", "Ochre"),
-                                tr(language, "鸭青", "Mallard"),
-                                tr(language, "群青", "Ultramarine"),
-                                tr(language, "胭脂", "Rouge"),
-                            ],
-                            theme_color,
-                            theme_color_pending,
-                            |owner| owner.theme_color,
-                            |owner, preference, cx| {
-                                if owner.send(Command::SetThemeColor(preference), cx) {
-                                    owner.theme_color_pending = true;
-                                    cx.notify();
-                                }
-                            },
-                            cx,
-                        )),
+                        .child(theme_colors),
                     ),
             )
             .child(
@@ -227,8 +202,8 @@ impl SettingsWindowView {
                     tr(language, "分类筛选标签", "Category filter tabs"),
                     tr(
                         language,
-                        "与主窗口工具栏分段一致；「全部」始终显示，且至少保留两个标签。关闭上方“显示分类筛选”时隐藏整条分段。",
-                        "Matches the history toolbar tabs; “All” is always shown and at least two tabs stay visible. Turn off “Show category filters” above to hide the whole bar.",
+                        "与主窗口工具栏分段一致；「全部」和「收藏」始终显示。关闭上方“显示分类筛选”时隐藏整条分段。",
+                        "Matches the history toolbar tabs; “All” and “Favorites” always stay on. Turn off “Show category filters” above to hide the whole bar.",
                     ),
                     "category-tabs-help",
                 )
@@ -237,20 +212,17 @@ impl SettingsWindowView {
                             .into_iter()
                             .zip(CATEGORY_TAB_SPECS)
                             .enumerate()
-                            .map(|(index, (selected, (_, chinese, english, _)))| {
+                            .map(|(index, (selected, (filter, chinese, english, _)))| {
                                 let owner = self.owner.clone();
                                 let tabs_enabled =
                                     display.show_category_filter && !display_pending;
-                                // 首项即「全部」：锁定开启，不受关闭影响。
-                                let is_all_tab = index == 0;
-                                let at_minimum_tabs =
-                                    display.category_tabs.enabled_count() <= 2 && selected;
-                                let checkbox_disabled =
-                                    !tabs_enabled || is_all_tab || at_minimum_tabs;
+                                // Favorites is the `None` filter. Both it and All stay on.
+                                let locked =
+                                    matches!(filter, None | Some(ContentCategory::All));
                                 settings_toggle(cx, Checkbox::new(("category-tab", index)))
                                     .label(tr(language, chinese, english))
-                                    .checked(selected)
-                                    .disabled(checkbox_disabled)
+                                    .checked(selected || locked)
+                                    .disabled(!tabs_enabled || locked)
                                     .on_change(move |checked, _, cx| {
                                         let _ = owner.update(cx, |owner, cx| {
                                             let mut next = owner.display.value;
@@ -259,11 +231,6 @@ impl SettingsWindowView {
                                                 index,
                                                 *checked,
                                             );
-                                            // 开启分类栏时「全部」必须保留；disabled 已阻止
-                                            // 关闭「全部」或缩减到两标签以下，故不再二次校验。
-                                            if next.show_category_filter {
-                                                next.category_tabs.all = true;
-                                            }
                                             owner.save_display(next, cx);
                                         });
                                     })

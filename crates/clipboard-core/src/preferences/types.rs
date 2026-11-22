@@ -329,23 +329,9 @@ impl Default for CategoryTabVisibility {
 }
 
 impl CategoryTabVisibility {
-    pub fn enabled_count(self) -> u8 {
-        [
-            self.all,
-            self.favorites,
-            self.text,
-            self.image,
-            self.url,
-            self.other,
-        ]
-        .into_iter()
-        .filter(|enabled| *enabled)
-        .count() as u8
-    }
-
-    /// When the category filter bar is shown,「全部」must stay on and at least two tabs stay visible.
+    /// When the category filter bar is shown,「全部」and「收藏」must stay on.
     pub fn valid_for_filter_bar(self) -> bool {
-        self.all && self.enabled_count() >= 2
+        self.all && self.favorites
     }
 }
 
@@ -384,6 +370,15 @@ impl Default for DisplayPreference {
 }
 
 impl DisplayPreference {
+    /// Turns「全部」and「收藏」on when the filter bar is shown.
+    pub fn with_locked_category_tabs(mut self) -> Self {
+        if self.show_category_filter {
+            self.category_tabs.all = true;
+            self.category_tabs.favorites = true;
+        }
+        self
+    }
+
     pub fn valid(self) -> bool {
         (1..=10).contains(&self.card_max_lines)
             && (!self.show_category_filter || self.category_tabs.valid_for_filter_bar())

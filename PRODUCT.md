@@ -52,7 +52,7 @@ Claims neighboring clipboard tools cannot truthfully copy as a set:
 **Hard technical constraints**
 
 - Stack: Rust workspace `clipboard-gpui` → `clipboard-platform` → `clipboard-core`; GPUI Kit for catalog controls; no second UI framework.
-- Per-file Rust sources ≤ 640 physical lines (`scripts/check-source-size.ps1` / `just check`).
+- Per-file Rust sources ≤ 640 physical lines (560+ warns; split by cohesive responsibility, not LOC targets; `scripts/check-source-size.ps1` / `just check`). Process detail: `docs/README.md`.
 - Content limits: text/rich ≤ 1 MiB combined rules as implemented; images ≤ 25M pixels / 50 MiB PNG; file lists path-only ≤ 256 items or 1 MiB; no staged file copies.
 - Wayland: requires compositor data-control; no silent XWayland capture fallback; global hotkey/auto-paste/source/position limited or unavailable.
 - Known product limits: remote http(s) images in HTML preview not loaded; editing HTML saves as plain text; some apps (e.g. WeChat) delay-render image formats with no data — capture skipped silently.

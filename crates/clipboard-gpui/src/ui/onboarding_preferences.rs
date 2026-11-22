@@ -2,10 +2,15 @@ use super::*;
 use gpui_kit::component::switch::Switch;
 
 impl ClipboardView {
-    pub(super) fn onboarding_preferences(&self, cx: &mut Context<Self>) -> Div {
+    pub(super) fn onboarding_preferences(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let language = self.language;
         let pending = self.onboarding_saving();
         let owner = cx.weak_entity();
+        let available = window
+            .viewport_size()
+            .width
+            .min(px(visual::CHOICE_MAX_WIDTH + 2. * visual::SPACE_4))
+            - px(3. * visual::SPACE_4); // side padding and scrollbar gutter
         let legacy_radius = match self.corner_radius.value {
             CornerRadiusPreference::Fixed(value) if ![0, 4, 16].contains(&value) => Some(value),
             _ => None,
@@ -45,6 +50,21 @@ impl ClipboardView {
                         },
                         cx,
                     ))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(visual::SPACE_2))
+                            .child(tr(language, "主题色", "Theme color"))
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .size(px(visual::SPACE_2))
+                                    .rounded_full()
+                                    .bg(cx.theme().primary),
+                            ),
+                    )
+                    .child(self.onboarding_theme_color(available, window, pending, cx))
                     .child(div().child(tr(language, "圆角", "Corner radius")))
                     .child(
                         settings_common::choice_tabs(

@@ -319,6 +319,8 @@ impl HistoryMenuWindow {
         let placed = fitted_menu_bounds(self.anchor, self.screen, menu.size, wants);
         place_menu_window(native, placed, window.scale_factor());
         window.bounds_changed(cx);
+        // This layout needs the new viewport, but GPUI drops refreshes during a draw.
+        window.defer(cx, Window::bounds_changed);
         self.fitted.set(Some(placed_key(placed)));
         self.flyout.set(wants);
     }

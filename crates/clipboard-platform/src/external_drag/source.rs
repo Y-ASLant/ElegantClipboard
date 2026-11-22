@@ -1,6 +1,6 @@
 use super::{
-    DragPointerState, ExternalDragOptions, ExternalDragOutcome, contains, move_drag_preview,
-    poll_drag_pointer,
+    DragPointerState, ExternalDragOptions, ExternalDragOutcome, contains, foreground_changed,
+    move_drag_preview, poll_drag_pointer,
 };
 use std::{
     cell::Cell,
@@ -10,7 +10,7 @@ use std::{
 use windows::{
     Win32::{
         Foundation::{
-            DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, DRAGDROP_S_USEDEFAULTCURSORS, RECT, S_OK,
+            DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, DRAGDROP_S_USEDEFAULTCURSORS, HWND, RECT, S_OK,
         },
         System::{
             Ole::{DROPEFFECT, IDropSource, IDropSource_Impl},
@@ -22,6 +22,7 @@ use windows::{
 
 #[implement(IDropSource)]
 pub(super) struct DragSource {
+    pub foreground: HWND,
     pub rect: RECT,
     pub has_left: Cell<bool>,
     pub returned: Rc<Cell<Option<ExternalDragOutcome>>>,
@@ -80,7 +81,7 @@ impl DragSource {
 
 impl IDropSource_Impl for DragSource_Impl {
     fn QueryContinueDrag(&self, escape: BOOL, keys: MODIFIERKEYS_FLAGS) -> HRESULT {
-        if escape.as_bool() || self.failed.get() {
+        if escape.as_bool() || self.failed.get() || foreground_changed(self.foreground) {
             return DRAGDROP_S_CANCEL;
         }
         let Ok(mut pointer) = poll_drag_pointer() else {

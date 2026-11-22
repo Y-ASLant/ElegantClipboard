@@ -1,6 +1,7 @@
 mod motion;
 
 use super::*;
+use gpui_kit::component::tag::Tag;
 
 #[derive(Clone)]
 pub(super) struct HistoryCardSnapshot {
@@ -24,13 +25,14 @@ pub(super) struct HistoryCardSnapshot {
 }
 
 impl HistoryCardSnapshot {
-    fn metadata_row(&self, cx: &App) -> Div {
+    fn metadata_row(&self, drop_hint: Option<&'static str>, cx: &App) -> Div {
         let source_icon = self
             .source_app_icon
             .as_deref()
             .filter(|path| !path.is_empty());
         let (show_source_name, show_source_icon) =
             source_app_parts(self.display.source_app_display, source_icon.is_some());
+        let summary = drop_hint.map_or_else(|| self.summary.clone().into(), SharedString::from);
         div()
             .h(px(visual::METADATA_ROW_HEIGHT))
             .flex_none()
@@ -51,7 +53,10 @@ impl HistoryCardSnapshot {
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .text_ellipsis()
-                    .child(self.summary.clone()),
+                    .when(drop_hint.is_some(), |summary| {
+                        summary.text_color(cx.theme().accent_foreground)
+                    })
+                    .child(summary),
             )
             .when(self.display.show_source_app, |footer| {
                 footer.child(
@@ -197,7 +202,13 @@ impl HistoryCardSnapshot {
         }
     }
 
-    pub(super) fn surface(&self, preview: bool, cx: &App) -> Div {
+    pub(super) fn surface(
+        &self,
+        preview: bool,
+        show_pin: bool,
+        drop_hint: Option<&'static str>,
+        cx: &App,
+    ) -> Div {
         let media_layout = self.is_image || self.is_files;
         let spacing = visual::card_spacing(self.display.card_density);
         let padding = visual::card_padding(self.display.card_density);
@@ -236,35 +247,29 @@ impl HistoryCardSnapshot {
             .flex()
             .flex_col()
             .gap(px(spacing))
-            .child(body)
-            .child(self.metadata_row(cx))
-            .when(self.is_pinned, |card| card.child(pin_ribbon(cx)))
+            .child(body.when(self.is_pinned, |body| {
+                let theme = cx.theme();
+                body.child(
+                    Tag::custom(
+                        theme.accent,
+                        theme.accent_foreground,
+                        theme.ring.opacity(0.6),
+                    )
+                    .small()
+                    .rounded(theme.radius)
+                    .h(px(visual::METADATA_ROW_HEIGHT))
+                    .px(px(visual::SPACE_3 / 2.))
+                    .py(px(0.))
+                    .flex_none()
+                    .text_size(px(visual::TEXT_SMALL))
+                    .whitespace_nowrap()
+                    .when(!media_layout, |tag| tag.ml(px(visual::SPACE_2)))
+                    .when(!show_pin, |tag| tag.invisible())
+                    .child(tr(self.language, "置顶", "Pinned")),
+                )
+            }))
+            .child(self.metadata_row(drop_hint, cx))
     }
-}
-
-/// 置顶封条的平行斜边连接卡片上边与右边，留白等于卡片圆角。
-fn pin_ribbon(cx: &App) -> Div {
-    let inner = crate::card_radius::card_radius(cx).as_f32();
-    let outer = inner + 12.;
-    let fill = cx.theme().primary;
-    div().absolute().top_0().right_0().size(px(outer)).child(
-        canvas(
-            |_, _, _| (),
-            move |bounds, (), window, _| {
-                let corner = point(bounds.origin.x + bounds.size.width, bounds.origin.y);
-                let mut path = PathBuilder::fill();
-                path.move_to(point(corner.x - px(outer), corner.y));
-                path.line_to(point(corner.x - px(inner), corner.y));
-                path.line_to(point(corner.x, corner.y + px(inner)));
-                path.line_to(point(corner.x, corner.y + px(outer)));
-                path.close();
-                if let Ok(path) = path.build() {
-                    window.paint_path(path, fill);
-                }
-            },
-        )
-        .size_full(),
-    )
 }
 
 // 尺寸与内边距跟随源行的实测几何，原生浮窗与 GPUI 回退共用同一外壳。
@@ -284,8 +289,14 @@ impl HistoryDrag {
     }
 
     pub(super) fn render_card(&self, cx: &App) -> AnyElement {
+        // The preview can cover the strip, so keep its release hint visible here.
+        let drop_hint = self
+            .favorite_drop
+            .hovered
+            .get()
+            .then(|| favorite_drop::release_hint(self.card.language, self.favorite_only));
         drag_card(self.size(), self.card.display.card_density, cx)
-            .child(self.card.surface(true, cx))
+            .child(self.card.surface(true, true, drop_hint, cx))
             .into_any_element()
     }
 }

@@ -168,7 +168,7 @@ fn missing_category_tabs_use_all_favorites_and_other() {
 }
 
 #[test]
-fn display_requires_all_tab_and_at_least_two_category_tabs() -> Result<()> {
+fn display_requires_all_and_favorites_when_the_filter_bar_is_shown() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let db = Database::new(directory.path().join("clipboard.db"))?;
     let preferences = Preferences::new(&db);
@@ -202,6 +202,20 @@ fn display_requires_all_tab_and_at_least_two_category_tabs() -> Result<()> {
     assert!(!only_all.valid());
     assert!(preferences.set_display(only_all).is_err());
 
+    let favorites_off = DisplayPreference {
+        show_category_filter: true,
+        category_tabs: CategoryTabVisibility {
+            all: true,
+            favorites: false,
+            text: true,
+            image: false,
+            url: false,
+            other: false,
+        },
+        ..DisplayPreference::default()
+    };
+    assert!(!favorites_off.valid());
+    assert!(preferences.set_display(favorites_off).is_err());
     let all_disabled = DisplayPreference {
         show_category_filter: true,
         category_tabs: CategoryTabVisibility {
@@ -231,6 +245,27 @@ fn display_requires_all_tab_and_at_least_two_category_tabs() -> Result<()> {
     };
     assert!(minimal.valid());
     preferences.set_display(minimal)?;
+    Ok(())
+}
+
+#[test]
+fn stored_filter_bar_reopens_with_all_and_favorites_locked_on() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("clipboard.db");
+    let db = Database::new(path.clone())?;
+    SettingsRepository::new(&db).set(
+        DISPLAY_KEY,
+        r#"{"show_category_filter":true,"category_tabs":{"all":false,"favorites":false,"text":true},"card_density":"compact","card_max_lines":4}"#,
+    )?;
+    drop(db);
+    let loaded = Preferences::new(&Database::new(path)?).display()?;
+    assert!(loaded.show_category_filter);
+    assert!(
+        loaded.category_tabs.all && loaded.category_tabs.favorites && loaded.category_tabs.text
+    );
+    assert!(!loaded.category_tabs.image);
+    assert_eq!(loaded.card_density, CardDensity::Compact);
+    assert_eq!(loaded.card_max_lines, 4);
     Ok(())
 }
 

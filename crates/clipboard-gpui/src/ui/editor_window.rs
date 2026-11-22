@@ -74,7 +74,7 @@ pub(super) fn memo_kind_toggle(
     kind: Option<MemoKind>,
     language: LanguagePreference,
     owner: WeakEntity<ClipboardView>,
-    _cx: &App,
+    pending: bool,
 ) -> AnyElement {
     if !adding {
         return div().into_any_element();
@@ -88,6 +88,7 @@ pub(super) fn memo_kind_toggle(
         .children(labels.map(|label| {
             Tab::new()
                 .label(label)
+                .disabled(pending)
                 .text_size(px(visual::TEXT_SMALL))
                 .aria_label(label)
                 .flex_1()
@@ -99,6 +100,9 @@ pub(super) fn memo_kind_toggle(
                 MemoKind::Note
             };
             let _ = owner.update(cx, |view, cx| {
+                if view.todo_edit_saving || view.editor_discard_open {
+                    return;
+                }
                 if let Some(draft) = view.todo_draft.as_mut().filter(|draft| draft.id.is_none()) {
                     draft.kind = next;
                 }
@@ -106,6 +110,21 @@ pub(super) fn memo_kind_toggle(
             });
         })
         .into_any_element()
+}
+
+pub(super) fn request_standalone_editor_close(
+    owner: &WeakEntity<ClipboardView>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if owner
+        .update(cx, |owner, cx| {
+            owner.request_editor_close(false, window, cx)
+        })
+        .unwrap_or(true)
+    {
+        window.remove_window();
+    }
 }
 
 impl ClipboardView {
@@ -167,13 +186,7 @@ impl ClipboardView {
                 acrylic::init_window_effect(window_effect, window, cx);
                 window.set_window_title(editor_title(language, adding_todo));
                 window.on_window_should_close(cx, move |window, cx| {
-                    if close_owner
-                        .update(cx, |owner, cx| owner.close_content_editor_from_window(cx))
-                        .unwrap_or(true)
-                    {
-                        // Let GPUI destroy the HWND; a system close leaves it to drop a dead handle.
-                        window.remove_window();
-                    }
+                    request_standalone_editor_close(&close_owner, window, cx);
                     false
                 });
                 cx.new(|cx| content_editor::ContentEditorWindow::new(editor_owner, window, cx))
@@ -206,18 +219,15 @@ impl ClipboardView {
             return false;
         }
         self.editor_window = None;
-        let had_item = self.editor.id.take().is_some();
-        let had_todo = self.todo_draft.take().is_some();
-        if !had_item && !had_todo {
-            return true;
-        }
-        if had_item {
-            self.release_editor_session();
-        }
+        self.release_editor_session();
         let focus = self.list_focus.clone();
         let main = self.main_window;
         cx.defer(move |cx| {
-            let _ = main.update(cx, |_, window, cx| window.focus(&focus, cx));
+            let _ = main.update(cx, |_, window, cx| {
+                if !window.has_active_dialog(cx) {
+                    window.focus(&focus, cx);
+                }
+            });
         });
         cx.notify();
         true
@@ -225,10 +235,7 @@ impl ClipboardView {
 
     fn fail_content_editor_open(&mut self, error: impl std::fmt::Debug, cx: &mut Context<Self>) {
         self.editor_window = None;
-        self.todo_draft = None;
-        if self.editor.id.take().is_some() {
-            self.release_editor_session();
-        }
+        self.release_editor_session();
         self.set_feedback_message(format!(
             "{}: {error:?}",
             tr(

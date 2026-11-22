@@ -111,7 +111,7 @@ impl ClipboardView {
         self.select_group((next > 0).then(|| self.groups[next - 1].id), window, cx);
     }
     pub(super) fn open_group_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.close_editor(window, cx) {
+        if !self.dismiss_note_for_dialog(window, cx) {
             return;
         }
         self.group_editor_open = true;

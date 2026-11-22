@@ -1,8 +1,8 @@
-# Keep production code, examples and tests within the same module-size budget.
+# Per-file budget: 640 hard max, 560 warn. Split by cohesive responsibility; see docs/README.md.
 [CmdletBinding()]
 param(
     [string]$SourceRoot,
-    [int]$WarnAt = 550
+    [int]$WarnAt = 560
 )
 
 $ErrorActionPreference = 'Stop'
@@ -33,7 +33,7 @@ $warnings | ForEach-Object { Write-Warning $_ }
 
 if ($violations.Count -gt 0) {
     $violations | ForEach-Object { Write-Host $_ }
-    throw 'Split oversized Rust files into cohesive responsibility-based modules.'
+    throw 'Split oversized Rust files by cohesive responsibility (not line-count slices). See docs/README.md.'
 }
 
 Write-Host "Source size check passed: $($files.Count) Rust files, maximum $maximumLines lines each."

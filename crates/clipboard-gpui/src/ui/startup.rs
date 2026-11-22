@@ -239,19 +239,19 @@ pub fn run(
                         if exiting.get() {
                             return true;
                         }
-                        // Keep independent editor/todo windows; only block on in-main note save.
-                        if close_view.update(cx, |this, cx| {
-                            this.editor_window.is_none() && !this.close_editor(window, cx)
-                        }) {
-                            return false;
-                        }
                         if !tray_enabled.get() {
-                            return true;
+                            close_view.update(cx, |this, cx| this.request_app_exit(window, cx));
+                            return false;
                         }
                         close_view.update(cx, |this, cx| {
                             if this.batch_pending
                                 || this.paste_state.pending()
                                 || this.paste_state.merging()
+                            {
+                                return;
+                            }
+                            if this.note_original.is_some()
+                                && !this.request_editor_close(true, window, cx)
                             {
                                 return;
                             }

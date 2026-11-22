@@ -18,12 +18,6 @@ impl ClipboardView {
                 .absolute()
                 .size_full(),
             )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, _, _| {
-                    this.drag_release_pending = false;
-                }),
-            )
             .key_context("HistoryList")
             .track_focus(&self.list_focus)
             .flex_1()
@@ -35,6 +29,9 @@ impl ClipboardView {
                         return;
                     }
                     let y = event.event.position.y;
+                    let over_favorites =
+                        this.history_favorite_drop_at(event.drag(cx), event.event.position);
+                    this.set_favorite_drop_hovered(over_favorites, cx);
                     let inside = event.bounds.contains(&event.event.position);
                     let direction = if !inside {
                         0
@@ -94,6 +91,16 @@ impl ClipboardView {
                 this.select(this.page_step(), ScrollStrategy::Top, cx);
             }))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if this.batch_mode
+                    && event.keystroke.key == "space"
+                    && event.keystroke.modifiers == gpui_kit::Modifiers::default()
+                {
+                    cx.stop_propagation();
+                    if !event.is_held {
+                        this.toggle_focused_batch_mark(window, cx);
+                    }
+                    return;
+                }
                 // 多选快捷键为可改偏好，不做静态绑定；与偏好串匹配才进多选。
                 if event.is_held || this.batch_hotkey.value.trim().is_empty() {
                     return;

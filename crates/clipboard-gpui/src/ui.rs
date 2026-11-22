@@ -11,6 +11,8 @@ mod editor_actions;
 mod editor_window;
 mod events;
 mod external_drag;
+mod favorite_drop;
+use favorite_drop::FavoriteDropZone;
 mod file_cards;
 mod group_select;
 mod groups;
@@ -152,7 +154,8 @@ use gpui_kit::{
     component::{
         button::*,
         input::{
-            Input, InputEvent, InputState, NumberInputEvent, StepAction, Textarea, TextareaState,
+            EditorState, Input, InputEvent, InputState, NumberInputEvent, Rope, StepAction,
+            Textarea, TextareaState,
         },
         *,
     },
@@ -213,6 +216,7 @@ struct HistoryDrag {
     generation: u64,
     card: drag_visual::HistoryCardSnapshot,
     size: Rc<Cell<gpui_kit::Size<Pixels>>>,
+    favorite_drop: Rc<FavoriteDropZone>,
     native_preview: bool,
 }
 
@@ -345,7 +349,10 @@ struct ClipboardView {
     editor: PreviewState,
     /// 正文编辑的独立窗口。备注仍用主窗口对话框。
     editor_window: Option<AnyWindowHandle>,
+    editor_input: Option<(Entity<EditorState>, Rope)>,
+    editor_discard_open: bool,
     note_input: Entity<InputState>,
+    note_original: Option<Rope>,
     note_save_pending: bool,
     editor_source_hash: Option<String>,
     editor_save_pending: bool,
@@ -375,15 +382,15 @@ struct ClipboardView {
     row_sizes: Rc<Vec<gpui_kit::Size<Pixels>>>,
     row_offsets: Vec<Pixels>,
     monitoring: bool,
-    onboarding_completed: bool,
-    onboarding_step: usize,
+    onboarding_step: onboarding::OnboardingStep,
     onboarding_revision: usize,
     onboarding_pending: bool,
-    show_onboarding: bool,
+    onboarding_mode: Option<onboarding::OnboardingMode>,
     onboarding_hotkey_used: bool,
     onboarding_error: Option<String>,
     onboarding_shortcut: Option<Entity<onboarding::shortcut::OnboardingShortcut>>,
     onboarding_practice: Option<Entity<onboarding::practice::OnboardingPractice>>,
+    onboarding_favorites: Option<Entity<onboarding::favorites::OnboardingFavorites>>,
     settings_window: Option<AnyWindowHandle>,
     todo_toast: Option<WindowHandle<todo_toast::TodoToastWindow>>,
     history_menu_window: Option<AnyWindowHandle>,
@@ -470,6 +477,8 @@ struct ClipboardView {
     drag_snapshot: Option<(Vec<DbClipboardItem>, i64, u64)>,
     drag_deleted_ids: HashSet<i64>,
     drag_viewport: Rc<Cell<Option<Bounds<Pixels>>>>,
+    favorite_drop: Rc<FavoriteDropZone>,
+    history_drag_uses_gpui: bool,
     drag_release_pending: bool,
     drag_token: u64,
     paused: bool,
@@ -479,9 +488,6 @@ struct ClipboardView {
     /// The history query for this generation produced neither a snapshot nor a failure.
     history_reply_missed: bool,
     feedback_pending: bool,
-    /// Clears transient search field feedback after a short delay.
-    panel_status_token: u64,
-    panel_status_task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
     _events: Task<()>,
     history_load_task: Option<Task<()>>,

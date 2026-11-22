@@ -1,6 +1,6 @@
 use super::*;
 #[cfg(not(target_os = "macos"))]
-use clipboard_platform::key_intercept::{self, InterceptedKey};
+use clipboard_platform::key_intercept::{self, InterceptedKey, InterceptedText};
 
 const ACTIVATION_POLL: Duration = Duration::from_millis(20);
 const ACTIVATION_ATTEMPTS: usize = 25;
@@ -25,9 +25,9 @@ impl ClipboardView {
                     } => cx.update(|window, cx| {
                         window.dispatch_keystroke(shortcut_keystroke(key, control, shift), cx);
                     }),
-                    InterceptedKey::Text => {
+                    InterceptedKey::Text(key) => {
                         update_clipboard_window(&view, main_window, cx, |this, window, cx| {
-                            this.handle_typed_key(window, cx);
+                            this.handle_typed_key(key, window, cx);
                         })
                     }
                 };
@@ -39,7 +39,23 @@ impl ClipboardView {
     }
 
     #[cfg(not(target_os = "macos"))]
-    fn handle_typed_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn handle_typed_key(
+        &mut self,
+        key: InterceptedText,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if key.unmodified_space
+            && self.batch_mode
+            && self.list_focus.is_focused(window)
+            && self.typing_activation.is_none()
+        {
+            if !key.is_held {
+                self.toggle_focused_batch_mark(window, cx);
+            }
+            return;
+        }
+        key.queue_for_replay();
         if self.typing_activation.is_some() {
             return;
         }
@@ -47,7 +63,11 @@ impl ClipboardView {
         if self.list_focus.is_focused(window) && !self.onboarding_visible() {
             self.search.update(cx, |input, cx| input.focus(window, cx));
         }
-        self.activate_for_input(window, cx);
+        if window.is_window_active() {
+            finish_typed_keys(true);
+        } else {
+            self.activate_for_input(window, cx);
+        }
     }
 
     pub(super) fn focus_search_for_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {

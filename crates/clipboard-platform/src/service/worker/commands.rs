@@ -166,6 +166,17 @@ impl Worker {
             Command::ToggleFavorite(id) => {
                 self.history.toggle_favorite(id)?;
             }
+            Command::SetFavorite { id, favorite } => {
+                if !self.history.set_favorite(id, favorite)? {
+                    return Ok(());
+                }
+                let message = if favorite {
+                    "已添加到收藏"
+                } else {
+                    "已取消收藏"
+                };
+                self.send_event(Event::Status(message.into()))?;
+            }
             Command::TogglePin(id) => {
                 self.history.toggle_pin(id)?;
             }

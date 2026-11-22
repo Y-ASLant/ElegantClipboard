@@ -12,7 +12,7 @@ ElegantClipboard is a native clipboard manager built with Rust, GPUI, and gpui-k
 - Rich text can be copied or pasted back to the original window as a single format (plain text/HTML/RTF), with an explicit error when the chosen format is missing; plain text supports transformed copy/paste (trim, remove line breaks, case changes); restoring the original clipboard after paste can be enabled (off by default)
 - Sequence paste: multi-select records and paste them into the original window one by one via a global advance key (Ctrl+Shift+G by default); the queue ends when exhausted and is cancelled by leaving the panel or copying/deleting
 - HTML entries render rich-text layout (with local images) in a hover preview while the list keeps plain-text summaries; images can be pasted into chat windows as images or into Explorer as files
-- A three-step first-run guide in a new data directory: pick a language, inspect and record shortcuts, configure theme and autostart; demo records are isolated from real history; Settings → About reopens the guide
+- A four-step guide in a new data directory: configure the history shortcut, practice search and paste, drag to add and remove favorites, and choose preferences. Samples leave real history and the system clipboard unchanged. Reopen it from Settings → About → Reopen guide.
 - Settings organized as General, Display, Appearance, Data, App filter, Audio, Shortcuts, and About: per-type capture toggles (at least one stays on), source-app filtering by rules or running apps, and copy/paste sound options
 - Groups and entries: favorites, pins, and groups that can be created, renamed, deleted, and reordered; cards sort by dragging either edge, batch-select for deletion or cleanup; card preview lines, time format, character count, size, and source display are all configurable
 - Standalone hover previews: a transparent, mouse-passthrough, nonactivating layer placed beside the main window; Ctrl+wheel zooms images or scrolls text and leaving the source card closes it; regular files store only their original paths, reporting moved or deleted sources as unavailable
@@ -47,7 +47,7 @@ scripts/               Packaging and verification helpers
 docs/                  Architecture decisions, feature status, QA evidence
 ```
 
-Dependency direction: `clipboard-gpui -> clipboard-platform -> clipboard-core`; core never depends on GPUI or OS APIs. Every Rust source, example, and test file is limited to **640 physical lines**, enforced by `just check` and CI. See the [engineering documentation](docs/README.md) for module responsibilities.
+Dependency direction: `clipboard-gpui -> clipboard-platform -> clipboard-core`; core never depends on GPUI or OS APIs. Every Rust source, example, and test file is limited to **640** physical lines (≥560 warns; split by responsibility; no opportunistic splits inside feature PRs), enforced by `just check` and CI. Details: [engineering docs](docs/README.md#模块边界与维护约束).
 
 ## Run from source
 

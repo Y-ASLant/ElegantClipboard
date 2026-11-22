@@ -48,6 +48,22 @@ fn hotkey_change_is_acknowledged_and_loaded_on_restart() -> Result<()> {
             _ => None,
         },
     );
+    // The keypad alias only conflicts when a quick-paste slot is bound.
+    let mut shortcuts = service.initial_preferences.paste_shortcuts.clone();
+    shortcuts.set_slot(false, 1, "Alt+1".into())?;
+    service.send(Command::SetPasteShortcuts(Box::new(shortcuts)))?;
+    wait_for(
+        &events,
+        Duration::from_secs(5),
+        "paste shortcuts save timed out",
+        |event| match event {
+            Event::PasteShortcutsSaved(result) => Some(result),
+            Event::Error(message) => panic!("{message}"),
+            _ => None,
+        },
+    )
+    .map_err(anyhow::Error::msg)?;
+
     for rejected in ["Alt+Numpad1", "Ctrl+Ctrl+V", ""] {
         service.send(Command::SetHotkey(HotkeyPreference::Shortcut(
             rejected.into(),
