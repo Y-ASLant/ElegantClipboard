@@ -109,11 +109,7 @@ impl ClipboardView {
                         TrayCommand::Settings => {
                             this.open_settings_window(SettingsPage::General, cx)
                         }
-                        TrayCommand::ClearHistory => {
-                            this.paste_state.set_target(None);
-                            this.show_window(window, cx);
-                            this.open_clear_history(window, cx);
-                        }
+                        TrayCommand::Restart => this.restart_application(window, cx),
                         TrayCommand::TogglePause => {
                             if this.monitoring
                                 && !this.pause_pending
@@ -398,6 +394,34 @@ impl ClipboardView {
                 } else {
                     self.request_app_exit(window, cx);
                 }
+            }
+        }
+    }
+
+    /// 托盘「重启程序」：标记实例锁等待后拉起同数据目录子进程，再退出本进程。
+    pub(super) fn restart_application(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.prepare_app_exit(cx) {
+            return;
+        }
+        let _ = clipboard_platform::launch_env::mark_wait_for_instance(&self.service.data_dir);
+        let spawn = std::env::current_exe().and_then(|executable| {
+            let mut command = std::process::Command::new(executable);
+            clipboard_platform::launch_env::apply(&mut command, Some(&self.service.data_dir));
+            command.spawn()
+        });
+        match spawn {
+            Ok(_child) => {
+                self.close_editor(window, cx);
+                self.exiting.set(true);
+                cx.quit();
+            }
+            Err(error) => {
+                self.set_feedback_message(format!(
+                    "{}: {error}",
+                    tr(self.language, "重启失败", "Failed to restart")
+                ));
+                self.is_error = true;
+                cx.notify();
             }
         }
     }

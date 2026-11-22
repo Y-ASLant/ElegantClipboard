@@ -347,35 +347,6 @@ impl ClipboardView {
     });
         cx.notify();
     }
-
-    pub(super) fn open_clear_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.group_save_pending
-            || self.group_delete_pending
-            || self.clear_pending
-            || self.batch_pending
-        {
-            return;
-        }
-        if !self.dismiss_note_for_dialog(window, cx) {
-            return;
-        }
-        self.reset_selection();
-        self.group_editor_open = false;
-        self.group_rename_id = None;
-        self.group_move_id = None;
-        window.focus(&self.list_focus, cx);
-        if self.skip_clear_confirm.value {
-            self.close_history_confirmation(window, cx);
-            self.clear_history(window, cx);
-        } else {
-            self.open_history_confirmation(
-                HistoryConfirmation::ClearHistory(self.history.group_id()),
-                window,
-                cx,
-            );
-        }
-        cx.notify();
-    }
 }
 
 #[cfg(test)]

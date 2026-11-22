@@ -14,7 +14,7 @@ mod linux;
 pub enum TrayCommand {
     Toggle,
     Settings,
-    ClearHistory,
+    Restart,
     TogglePause,
     Quit,
 }
@@ -41,7 +41,7 @@ pub fn create(
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
         let command = match event.id.as_ref() {
             "toggle" => Some(TrayCommand::Toggle),
-            "clear-history" => Some(TrayCommand::ClearHistory),
+            "restart" => Some(TrayCommand::Restart),
             "settings" => Some(TrayCommand::Settings),
             "toggle-pause" => Some(TrayCommand::TogglePause),
             "quit" => Some(TrayCommand::Quit),
@@ -160,11 +160,11 @@ fn create_menu(language: LanguagePreference, paused: bool, monitoring: bool) -> 
     ))
     .context("无法创建托盘菜单")?;
     menu.append(&MenuItem::with_id(
-        "clear-history",
+        "restart",
         if english {
-            "Clear history"
+            "Restart application"
         } else {
-            "清理历史"
+            "重启程序"
         },
         true,
         None,
