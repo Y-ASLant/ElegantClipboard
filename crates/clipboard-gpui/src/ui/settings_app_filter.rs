@@ -1,6 +1,7 @@
 use super::settings_common::{
     SETTINGS_INSET_LIST_MAX_HEIGHT, choice_tabs, owner_state, pref_checkbox, settings_description,
-    settings_field, settings_inline, settings_inset_list, settings_inset_list_row, settings_stack,
+    settings_field, settings_field_help, settings_inline, settings_inset_list,
+    settings_inset_list_row, settings_stack,
 };
 use super::*;
 use gpui_kit::component::{accordion::Accordion, alert::Alert};
@@ -43,7 +44,24 @@ impl SettingsWindowView {
                 .w_full(),
             )
             .child(
-                settings_field(tr(language, "过滤模式", "Filter mode")).child(
+                settings_field_help(
+                    tr(language, "过滤模式", "Filter mode"),
+                    if app_filter.mode == AppFilterMode::Blacklist {
+                        tr(
+                            language,
+                            "匹配规则的应用不记录；来源未知时继续记录",
+                            "Matching apps are skipped; unknown sources are recorded",
+                        )
+                    } else {
+                        tr(
+                            language,
+                            "只记录匹配规则的应用；规则为空或来源未知时继续记录",
+                            "Only matching apps are recorded; empty rules or unknown sources are recorded",
+                        )
+                    },
+                    "app-filter-mode-help",
+                )
+                .child(
                     choice_tabs(
                         "app-filter-mode",
                         &self.owner,
@@ -64,22 +82,6 @@ impl SettingsWindowView {
                     ),
                 ),
             )
-            .child(settings_description(
-                if app_filter.mode == AppFilterMode::Blacklist {
-                    tr(
-                        language,
-                        "匹配规则的应用不记录；来源未知时继续记录",
-                        "Matching apps are skipped; unknown sources are recorded",
-                    )
-                } else {
-                    tr(
-                        language,
-                        "只记录匹配规则的应用；规则为空或来源未知时继续记录",
-                        "Only matching apps are recorded; empty rules or unknown sources are recorded",
-                    )
-                },
-                cx,
-            ))
             .child(
                 settings_field(tr(language, "进程名或规则", "Process name or pattern"))
                     .child(

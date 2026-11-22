@@ -1,7 +1,4 @@
-use super::settings_common::{
-    owner_state, settings_columns, settings_description, settings_description_body,
-    settings_inline, settings_stack,
-};
+use super::settings_common::{owner_state, settings_description, settings_inline, settings_stack};
 use super::*;
 use gpui_kit::component::alert::Alert;
 
@@ -63,6 +60,7 @@ impl SettingsWindowView {
         let optimize_owner = self.owner.clone();
         let folder_owner = self.owner.clone();
         let export_owner = self.owner.clone();
+        let clear_all_pending = owner_state.clear_all_pending;
 
         settings_inline()
             .child(
@@ -132,7 +130,8 @@ impl SettingsWindowView {
                                     owner.start_export(cx);
                                 });
                             }),
-                    ),
+                    )
+                    .child(self.clear_all_history_button(language, clear_all_pending)),
             )
             .into_any_element()
     }
@@ -164,17 +163,17 @@ impl SettingsWindowView {
             ),
         ];
         settings_stack()
-            .child(settings_description(tr(
-                language,
-                "先选择来源文件，再选择空目标目录。不会覆盖、合并或切换当前数据。完成后可以预览恢复的数据，预览不记录剪贴板。旧版数据库仅复制记录，迁移附件请使用旧版 ZIP。",
-                "Select a source file, then an empty destination folder. Current data will not be overwritten, merged or switched. Previewing the restored data does not record the clipboard. A legacy database copies records only; use a legacy ZIP to migrate attachments.",
-            ), cx))
             .child(
                 settings_inline().children(choices.into_iter().map(|(id, label, source)| {
                     let owner = self.owner.clone();
-                    Button::new(id).outline().h(px(visual::CONTROL_HEIGHT)).label(label).disabled(pending)
+                    Button::new(id)
+                        .outline()
+                        .h(px(visual::CONTROL_HEIGHT))
+                        .label(label)
+                        .disabled(pending)
                         .on_click(move |_, _, cx| {
-                            let _ = owner.update(cx, |owner, cx| owner.start_data_import(source, cx));
+                            let _ = owner
+                                .update(cx, |owner, cx| owner.start_data_import(source, cx));
                         })
                 })),
             )
@@ -211,123 +210,108 @@ impl SettingsWindowView {
             .into_any_element()
     }
 
-    pub(super) fn settings_privacy_content(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(owner_state) = owner_state(&self.owner, cx) else {
-            return div().into_any_element();
-        };
-        let language = owner_state.language;
-        let clear_all_pending = owner_state.clear_all_pending;
+    fn clear_all_history_button(
+        &self,
+        language: LanguagePreference,
+        clear_all_pending: bool,
+    ) -> Button {
         let privacy_owner = self.owner.clone();
-
-        settings_columns()
-            .items_center()
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .child(settings_description_body(
-                        tr(
-                            language,
-                            "永久删除全部剪贴板历史",
-                            "Permanently delete all clipboard history",
-                        ),
-                        cx,
-                    )),
-            )
-            .child(
-                Button::new("settings-window-clear-all")
-                    .danger()
-                    .h(px(visual::CONTROL_HEIGHT))
-                    .icon(IconName::Delete)
-                    .label(tr(language, "删除全部历史", "Delete all history"))
-                    .disabled(clear_all_pending)
-                    .on_click(move |_, window, cx| {
-                        let dialog_owner = privacy_owner.clone();
-                        let _ = dialog_owner.update(cx, |owner, cx| {
-                            owner.clear_all_error = None;
-                            cx.notify();
-                        });
-                        window.open_dialog(cx, move |dialog, _, cx| {
-                            let (pending, error) = dialog_owner
+        Button::new("settings-window-clear-all")
+            .danger()
+            .h(px(visual::CONTROL_HEIGHT_LARGE))
+            .icon(IconName::Delete)
+            .label(tr(language, "删除全部历史", "Delete all history"))
+            .tooltip(tr(
+                language,
+                "永久删除全部剪贴板历史",
+                "Permanently delete all clipboard history",
+            ))
+            .disabled(clear_all_pending)
+            .on_click(move |_, window, cx| {
+                let dialog_owner = privacy_owner.clone();
+                let _ = dialog_owner.update(cx, |owner, cx| {
+                    owner.clear_all_error = None;
+                    cx.notify();
+                });
+                window.open_dialog(cx, move |dialog, _, cx| {
+                    let (pending, error) = dialog_owner
+                        .upgrade()
+                        .map(|owner| {
+                            let owner = owner.read(cx);
+                            (owner.clear_all_pending, owner.clear_all_error.clone())
+                        })
+                        .unwrap_or((false, None));
+                    let confirm_owner = dialog_owner.clone();
+                    let keyboard_owner = dialog_owner.clone();
+                    let cancel_owner = dialog_owner.clone();
+                    dialog_shell(dialog, cx)
+                        .title(dialog_title(
+                            tr(language, "删除全部历史？", "Delete all history?"),
+                            cx,
+                        ))
+                        .on_ok(move |_, window, cx| {
+                            let _ = keyboard_owner.update(cx, |owner, cx| {
+                                owner.clear_all_history(cx);
+                            });
+                            window.refresh();
+                            false
+                        })
+                        .on_cancel(move |_, _, cx| {
+                            cancel_owner
                                 .upgrade()
-                                .map(|owner| {
-                                    let owner = owner.read(cx);
-                                    (owner.clear_all_pending, owner.clear_all_error.clone())
-                                })
-                                .unwrap_or((false, None));
-                            let confirm_owner = dialog_owner.clone();
-                            let keyboard_owner = dialog_owner.clone();
-                            let cancel_owner = dialog_owner.clone();
-                            dialog_shell(dialog, cx)
-                                .title(dialog_title(
-                                    tr(language, "删除全部历史？", "Delete all history?"),
-                                    cx,
+                                .is_none_or(|owner| !owner.read(cx).clear_all_pending)
+                        })
+                        .child(
+                            dialog_copy()
+                                .flex()
+                                .flex_col()
+                                .gap_2()
+                                .child(tr(
+                                    language,
+                                    "所有分组中的记录都会被删除，包括置顶和收藏。",
+                                    "All history in every group is deleted, including pinned and favorite items.",
                                 ))
-                                .on_ok(move |_, window, cx| {
-                                    let _ = keyboard_owner.update(cx, |owner, cx| {
-                                        owner.clear_all_history(cx);
-                                    });
-                                    window.refresh();
-                                    false
-                                })
-                                .on_cancel(move |_, _, cx| {
-                                    cancel_owner
-                                        .upgrade()
-                                        .is_none_or(|owner| !owner.read(cx).clear_all_pending)
-                                })
                                 .child(
-                                    dialog_copy()
-                                        .flex()
-                                        .flex_col()
-                                        .gap_2()
+                                    div()
+                                        .text_sm()
+                                        .text_color(cx.theme().muted_foreground)
                                         .child(tr(
                                             language,
-                                            "所有分组中的记录都会被删除，包括置顶和收藏。",
-                                            "All history in every group is deleted, including pinned and favorite items.",
-                                        ))
-                                        .child(
-                                            div()
-                                                .text_sm()
-                                                .text_color(cx.theme().muted_foreground)
-                                                .child(tr(
-                                                    language,
-                                                    "设置和自定义分组会保留；内容及受管媒体无法恢复，可先导出备份。",
-                                                    "Settings and custom groups will be kept. Content and managed media cannot be recovered; export a backup first if needed.",
-                                                )),
-                                        )
-                                        .when_some(error, |content, error| {
-                                            content.child(Alert::error("clear-all-error", error).small())
+                                            "设置和自定义分组会保留；内容及受管媒体无法恢复，可先导出备份。",
+                                            "Settings and custom groups will be kept. Content and managed media cannot be recovered; export a backup first if needed.",
+                                        )),
+                                )
+                                .when_some(error, |content, error| {
+                                    content.child(Alert::error("clear-all-error", error).small())
+                                }),
+                        )
+                        .footer(
+                            dialog_footer(cx)
+                                .child(
+                                    Button::new("clear-all-history-cancel")
+                                        .outline()
+                                        .label(tr(language, "取消", "Cancel"))
+                                        .disabled(pending)
+                                        .on_click(|_, window, cx| window.close_dialog(cx)),
+                                )
+                                .child(
+                                    Button::new("clear-all-history-confirm")
+                                        .danger()
+                                        .label(if pending {
+                                            tr(language, "正在删除…", "Deleting…")
+                                        } else {
+                                            tr(language, "删除", "Delete")
+                                        })
+                                        .disabled(pending)
+                                        .on_click(move |_, window, cx| {
+                                            let _ = confirm_owner.update(cx, |owner, cx| {
+                                                owner.clear_all_history(cx);
+                                            });
+                                            window.refresh();
                                         }),
-                                )
-                                .footer(
-                                    dialog_footer(cx)
-                                        .child(
-                                            Button::new("clear-all-history-cancel")
-                                                .outline()
-                                                .label(tr(language, "取消", "Cancel"))
-                                                .disabled(pending)
-                                                .on_click(|_, window, cx| window.close_dialog(cx)),
-                                        )
-                                        .child(
-                                            Button::new("clear-all-history-confirm")
-                                                .danger()
-                                                .label(if pending {
-                                                    tr(language, "正在删除…", "Deleting…")
-                                                } else {
-                                                    tr(language, "删除", "Delete")
-                                                })
-                                                .disabled(pending)
-                                                .on_click(move |_, window, cx| {
-                                                    let _ = confirm_owner.update(cx, |owner, cx| {
-                                                        owner.clear_all_history(cx);
-                                                    });
-                                                    window.refresh();
-                                                }),
-                                        ),
-                                )
-                        });
-                    }),
-            )
-            .into_any_element()
+                                ),
+                        )
+                });
+            })
     }
 }

@@ -38,17 +38,7 @@ impl SettingsWindowView {
                 &self.owner,
                 cx,
             ))
-            .when(formats.all, |panel| {
-                panel.child(settings_description(
-                    tr(
-                        language,
-                        "读取全部格式时不会使用此名单；关闭该选项后，已保存的名单会继续生效。",
-                        "This list is not used while Read all formats is on. Turn it off to use the saved list again.",
-                    ),
-                    cx,
-                ))
-            })
-            .when(names.is_empty(), |panel| {
+            .when(names.is_empty() && !formats.all, |panel| {
                 panel.child(settings_description(
                     tr(
                         language,
@@ -77,14 +67,6 @@ impl SettingsWindowView {
                         item.title(title).open(expanded).child(
                             settings_stack()
                                 .gap_2()
-                                .child(settings_description(
-                                    tr(
-                                        language,
-                                        "填写剪贴板实际名称，例如 CF_UNICODETEXT、HTML Format、PNG 或 Biff12，不要填写“图片”或“文本”。",
-                                        "Enter the exact clipboard name, such as CF_UNICODETEXT, HTML Format, PNG, or Biff12. Do not enter categories such as image or text.",
-                                    ),
-                                    cx,
-                                ))
                                 .when(error.is_some(), |panel| {
                                     panel.child(
                                         Alert::error(
@@ -202,8 +184,8 @@ fn all_formats_switch(
             "capture-all-formats-help",
             tr(
                 language,
-                "读取来源应用提供的全部格式，兼容性更好；复制大内容时可能让来源应用变慢。",
-                "Reads every format the source app offers. More compatible, but large copies can briefly slow that app.",
+                "读取来源应用提供的全部格式，兼容性更好；复制大内容时可能让来源应用变慢。开启时不会使用下方名单；关闭后已保存名单继续生效。",
+                "Reads every format the source app offers. More compatible, but large copies can briefly slow that app. While on, the list below is unused; turn off to use the saved list again.",
             ),
         ))
 }
@@ -265,6 +247,14 @@ fn format_editor(
 ) -> Div {
     let owner = view.owner.clone();
     settings_inline()
+        .child(help_tooltip(
+            "capture-format-name-help",
+            tr(
+                language,
+                "填写剪贴板实际名称，例如 CF_UNICODETEXT、HTML Format、PNG 或 Biff12，不要填写“图片”或“文本”。",
+                "Enter the exact clipboard name, such as CF_UNICODETEXT, HTML Format, PNG, or Biff12. Do not enter categories such as image or text.",
+            ),
+        ))
         .child(
             div().flex_1().min_w_0().child(
                 Input::new(&view.capture_format_input)

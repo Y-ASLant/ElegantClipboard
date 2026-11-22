@@ -125,6 +125,25 @@ pub(super) fn settings_slider_field(
         )
 }
 
+/// 分区标题行：标题与可选 ⓘ 同一行，不另起说明段。
+pub(super) fn settings_section_title(
+    title: impl Into<SharedString>,
+    help: Option<SharedString>,
+    help_id: impl Into<ElementId>,
+    cx: &App,
+) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .gap(px(visual::SPACE_1))
+        .text_size(px(visual::TEXT_BODY))
+        .font_semibold()
+        .line_height(relative(1.25))
+        .text_color(cx.theme().muted_foreground)
+        .child(title.into())
+        .when_some(help, |row, text| row.child(help_tooltip(help_id, text)))
+}
+
 /// 字段说明 ⓘ：悬停展示解释；优先上方，避免鼠标挡字。
 pub(super) fn help_tooltip(id: impl Into<ElementId>, text: impl Into<SharedString>) -> Button {
     let text: SharedString = text.into();
@@ -206,11 +225,6 @@ pub(super) const SETTINGS_INSET_LIST_MAX_HEIGHT: f32 = 288.;
 
 pub(super) fn settings_description(text: impl Into<SharedString>, cx: &App) -> Div {
     settings_description_sized(text, visual::TEXT_SMALL, cx)
-}
-
-/// `settings_description` 的正文（TEXT_BODY）字号版本，用于与操作按钮同行的说明。
-pub(super) fn settings_description_body(text: impl Into<SharedString>, cx: &App) -> Div {
-    settings_description_sized(text, visual::TEXT_BODY, cx)
 }
 
 fn settings_description_sized(text: impl Into<SharedString>, size: f32, cx: &App) -> Div {

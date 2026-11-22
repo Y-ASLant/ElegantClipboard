@@ -1,4 +1,4 @@
-use super::settings_common::{settings_description, settings_stack};
+use super::settings_common::{settings_section_title, settings_stack};
 use super::*;
 use gpui_kit::component::{
     group_box::{GroupBox, GroupBoxVariant, GroupBoxVariants},
@@ -189,17 +189,9 @@ const SECTIONS: &[Section] = &[
         page: SettingsPage::Data,
         chinese: "导入与恢复",
         english: "Import & restore",
-        description_chinese: "",
-        description_english: "",
+        description_chinese: "先选择来源文件，再选择空目标目录。不会覆盖、合并或切换当前数据。完成后可以预览恢复的数据，预览不记录剪贴板。旧版数据库仅复制记录，迁移附件请使用旧版 ZIP。",
+        description_english: "Select a source file, then an empty destination folder. Current data will not be overwritten, merged or switched. Previewing the restored data does not record the clipboard. A legacy database copies records only; use a legacy ZIP to migrate attachments.",
         content: SettingsWindowView::settings_import_content,
-    },
-    Section {
-        page: SettingsPage::Data,
-        chinese: "隐私清理",
-        english: "Privacy",
-        description_chinese: "",
-        description_english: "",
-        content: SettingsWindowView::settings_privacy_content,
     },
     Section {
         page: SettingsPage::AppFilter,
@@ -357,6 +349,7 @@ impl Render for SettingsWindowView {
                         section.description_english,
                     );
                     let settings = settings.clone();
+                    // title 留给侧栏；视觉标题画在 GroupBox 上，便于标题后挂 ⓘ。
                     let group = SettingGroup::new().variant(GroupBoxVariant::Normal);
                     let group = if title.is_empty() {
                         group
@@ -364,9 +357,9 @@ impl Render for SettingsWindowView {
                         group.title(title)
                     };
                     group
-                        .text_size(px(visual::TEXT_BODY))
-                        .font_semibold()
-                        .py(px(visual::SPACE_2))
+                        .text_size(px(0.))
+                        .line_height(relative(0.))
+                        .py(px(0.))
                         .gap(px(visual::SPACE_2))
                         .item(
                             SettingItem::render(move |_, _, cx| {
@@ -381,12 +374,15 @@ impl Render for SettingsWindowView {
                                         (section.content)(view, cx)
                                     })
                                     .unwrap_or_else(|_| div().into_any_element());
-                                let body = settings_stack()
-                                    .when(!description.is_empty(), |stack| {
-                                        stack.child(settings_description(description, cx))
-                                    })
-                                    .child(content)
-                                    .into_any_element();
+                                let help = (!description.is_empty()).then(|| description.into());
+                                let heading = (!title.is_empty()).then(|| {
+                                    settings_section_title(
+                                        title,
+                                        help,
+                                        ("settings-section-help", section_ix),
+                                        cx,
+                                    )
+                                });
                                 // 页面内容直接渲染，切换页面不做淡入动效。
                                 let base_style = StyleRefinement::default()
                                     .bg(cx.theme().group_box)
@@ -401,24 +397,28 @@ impl Render for SettingsWindowView {
                                 } else {
                                     base_style
                                 };
-                                div()
-                                    .w_full()
-                                    .min_w_0()
-                                    .child(
-                                        GroupBox::new()
-                                            .id(("settings-card", section_ix))
-                                            .outline()
-                                            .content_style(card_style)
-                                            .child(body),
-                                    )
-                                    .into_any_element()
+                                let card = GroupBox::new()
+                                    .id(("settings-card", section_ix))
+                                    .outline()
+                                    .content_style(card_style)
+                                    .when_some(heading, |box_, title_row| box_.title(title_row))
+                                    .child(settings_stack().child(content));
+                                div().w_full().min_w_0().child(card).into_any_element()
                             })
-                            .keywords(
-                                [page.label(language), title, description]
-                                    .into_iter()
+                            .keywords({
+                                let mut keys = vec![page.label(language), title, description];
+                                if section.chinese == "本地数据" {
+                                    keys.extend([
+                                        "删除全部历史",
+                                        "Delete all history",
+                                        "隐私",
+                                        "Privacy",
+                                    ]);
+                                }
+                                keys.into_iter()
                                     .filter(|k| !k.is_empty())
-                                    .collect::<Vec<_>>(),
-                            ),
+                                    .collect::<Vec<_>>()
+                            }),
                         )
                 });
             SettingPage::new(page.label(language))

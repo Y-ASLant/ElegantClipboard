@@ -1,5 +1,5 @@
 use super::settings_common::{
-    owner_state, settings_description, settings_field, settings_inline, settings_number_field,
+    help_tooltip, owner_state, settings_field, settings_inline, settings_number_field,
     settings_stack,
 };
 use super::*;
@@ -170,37 +170,42 @@ impl SettingsWindowView {
         let pending = owner_state.fonts.pending;
         settings_stack()
             .child(
-                settings_field(tr(language, "字体", "Fonts")).child(
-                    settings_inline()
-                        .flex_nowrap()
-                        .justify_between()
-                        .child(
-                            div().flex_1().min_w_0().child(settings_description(
+                settings_inline()
+                    .flex_nowrap()
+                    .justify_between()
+                    .items_center()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(visual::SPACE_1))
+                            .min_w_0()
+                            .child(tr(language, "字体", "Fonts"))
+                            .child(help_tooltip(
+                                "fonts-help",
                                 tr(
                                     language,
                                     "卡片可跟随界面字体，悬停预览可跟随卡片字体。三处字号独立设置。",
                                     "Cards can follow the interface font, and hover previews can follow the card font. Font sizes are set separately.",
                                 ),
-                                cx,
                             )),
-                        )
-                        .child(
-                            Button::new("reset-fonts")
-                                .flex_shrink_0()
-                                .label(tr(language, "恢复默认", "Reset to defaults"))
-                                .h(px(visual::CONTROL_HEIGHT))
-                                .ghost()
-                                .disabled(pending)
-                                .on_click({
-                                    let owner = self.owner.clone();
-                                    move |_, _, cx| {
-                                        let _ = owner.update(cx, |owner, cx| {
-                                            owner.save_fonts(FontPreference::default(), cx);
-                                        });
-                                    }
-                                }),
-                        ),
-                ),
+                    )
+                    .child(
+                        Button::new("reset-fonts")
+                            .flex_shrink_0()
+                            .label(tr(language, "恢复默认", "Reset to defaults"))
+                            .h(px(visual::CONTROL_HEIGHT))
+                            .ghost()
+                            .disabled(pending)
+                            .on_click({
+                                let owner = self.owner.clone();
+                                move |_, _, cx| {
+                                    let _ = owner.update(cx, |owner, cx| {
+                                        owner.save_fonts(FontPreference::default(), cx);
+                                    });
+                                }
+                            }),
+                    ),
             )
             .child(self.font_group(
                 tr(language, "界面字体", "Interface font"),
