@@ -25,10 +25,13 @@ pub(super) fn quote(path: &Path) -> Result<String> {
 }
 
 pub(super) fn exec(exe: &Path, data_dir: &Path) -> Result<String> {
+    // `env` injects launch variables; the binary itself takes no argv.
     Ok(format!(
-        "Exec={} --start-hidden --data-dir {}",
+        "Exec=env {}=1 {}={} {}",
+        crate::launch_env::START_HIDDEN,
+        crate::launch_env::DATA_DIR,
+        quote(data_dir)?,
         quote(exe)?,
-        quote(data_dir)?
     ))
 }
 
@@ -135,14 +138,19 @@ pub(super) fn parse(content: &str, data_dir: &Path) -> Option<Entry> {
                     return None;
                 }
                 let args = arguments(value)?;
-                if args.len() != 4
-                    || args[1] != "--start-hidden"
-                    || args[2] != "--data-dir"
-                    || Path::new(&args[3]) != data_dir
-                {
+                if args.len() != 4 || args[0] != "env" {
                     return None;
                 }
-                let exe = Path::new(&args[0]);
+                let hidden = format!("{}=1", crate::launch_env::START_HIDDEN);
+                let data_prefix = format!("{}=", crate::launch_env::DATA_DIR);
+                if args[1] != hidden || !args[2].starts_with(&data_prefix) {
+                    return None;
+                }
+                let data = &args[2][data_prefix.len()..];
+                if Path::new(data) != data_dir {
+                    return None;
+                }
+                let exe = Path::new(&args[3]);
                 if !exe.is_absolute() || !matches!(exe.file_name()?.to_str()?, "ElegantClipboard") {
                     return None;
                 }

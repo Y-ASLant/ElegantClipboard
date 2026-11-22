@@ -74,7 +74,8 @@ pub fn run(
         let run_as_admin = service.initial_preferences.run_as_admin;
         let elevated = clipboard_platform::elevation::is_elevated().unwrap_or(false);
         if run_as_admin && !elevated {
-            match clipboard_platform::elevation::relaunch_elevated(Some("--wait-for-instance")) {
+            let _ = clipboard_platform::launch_env::mark_wait_for_instance(&service.data_dir);
+            match clipboard_platform::elevation::relaunch_elevated() {
                 Ok(()) => {
                     tracing::info!("Relaunched elevated; exiting current process");
                     return Ok(());

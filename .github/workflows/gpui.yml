@@ -117,7 +117,7 @@ jobs:
         if: runner.os == 'Linux'
         timeout-minutes: 2
         shell: pwsh
-        run: ./scripts/run-ci-command.ps1 -LogName linux-startup -Program dbus-run-session -CommandArgs @('--', 'xvfb-run', '-a', './target/release/ElegantClipboard', '--smoke-test', '--data-dir', "$env:RUNNER_TEMP/elegant-gpui-smoke")
+        run: ./scripts/run-ci-command.ps1 -LogName linux-startup -Program dbus-run-session -CommandArgs @('--', 'env', 'ELEGANTCLIPBOARD_SMOKE_TEST=1', 'ELEGANTCLIPBOARD_NO_MONITOR=1', "ELEGANTCLIPBOARD_DATA_DIR=$env:RUNNER_TEMP/elegant-gpui-smoke", 'xvfb-run', '-a', './target/release/ElegantClipboard')
       - name: macOS DMG smoke
         if: runner.os == 'macOS'
         timeout-minutes: 2

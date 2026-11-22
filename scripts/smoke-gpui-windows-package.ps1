@@ -23,7 +23,10 @@ try {
         $stdout = Join-Path $temporary "stdout-$index.log"
         $stderr = Join-Path $temporary "stderr-$index.log"
         # Smoke mode disables capture and exits after rendering the native window.
-        $process = Start-Process -FilePath $application -ArgumentList @('--smoke-test', '--data-dir', "`"$data`"") -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+        $env:ELEGANTCLIPBOARD_SMOKE_TEST = '1'
+        $env:ELEGANTCLIPBOARD_DATA_DIR = $data
+        $env:ELEGANTCLIPBOARD_NO_MONITOR = '1'
+        $process = Start-Process -FilePath $application -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
         try {
             if (-not $process.WaitForExit(60000)) {
                 $process.Kill($true)

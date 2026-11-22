@@ -32,21 +32,17 @@ pub fn is_elevated() -> io::Result<bool> {
     result.map(|()| elevation.TokenIsElevated != 0)
 }
 
-/// 通过 ShellExecute "runas" 启动新的提权实例（会弹 UAC）。
-/// `extra_arg` 附加到启动参数（用于 `--wait-for-instance`）。
-pub fn relaunch_elevated(extra_arg: Option<&str>) -> io::Result<()> {
+/// 通过 ShellExecute "runas" 启动新的提权实例（会弹 UAC）。无参数。
+pub fn relaunch_elevated() -> io::Result<()> {
     let executable = env::current_exe()?;
     let executable = wide(executable.as_os_str());
     let operation = wide("runas");
-    let arguments = extra_arg.map(wide);
     let result = unsafe {
         ShellExecuteW(
             None,
             PCWSTR(operation.as_ptr()),
             PCWSTR(executable.as_ptr()),
-            arguments
-                .as_ref()
-                .map_or(PCWSTR::null(), |a| PCWSTR(a.as_ptr())),
+            PCWSTR::null(),
             PCWSTR::null(),
             SW_SHOWNORMAL,
         )

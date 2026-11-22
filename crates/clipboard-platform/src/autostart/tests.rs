@@ -29,9 +29,10 @@ fn startup_identity_rejects_other_arguments_and_corrupt_values() {
     let mut saved = value(Path::new(r"D:\ElegantClipboard.exe"), data_dir);
     saved.bytes = to_wide_bytes(&format!("{} --reset", saved.string().unwrap()));
     assert!(!belongs_to(&saved, data_dir));
-    saved.bytes = to_wide_bytes(
-        "\"D:\\ElegantClipboard.exe\" --start-hidden --data-dir \"D:\\history\"\0garbage",
-    );
+    saved.bytes = to_wide_bytes(&format!(
+        "{}\0garbage",
+        command(Path::new(r"D:\ElegantClipboard.exe"), data_dir)
+    ));
     assert!(!belongs_to(&saved, data_dir));
     saved.bytes.pop();
     assert!(!belongs_to(&saved, data_dir));

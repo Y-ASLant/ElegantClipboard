@@ -10,11 +10,5 @@ fn duplicate_exec_or_unexpanded_field_code_is_not_an_owned_entry() {
     let data_dir = temporary.path().join("data");
     let content = entry(&executable("old"), &data_dir).unwrap();
     assert!(desktop::parse(&(content.clone() + "Exec=other\n"), &data_dir).is_none());
-    assert!(
-        desktop::parse(
-            &content.replace(" --start-hidden", " %u --start-hidden"),
-            &data_dir
-        )
-        .is_none()
-    );
+    assert!(desktop::parse(&content.replace(" env ", " env %u "), &data_dir).is_none());
 }

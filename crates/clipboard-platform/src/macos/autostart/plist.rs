@@ -9,12 +9,16 @@ pub(super) fn xml(value: &str) -> String {
         .replace('\'', "&apos;")
 }
 
-pub(super) fn arguments(exe: &str, data_dir: &str) -> String {
+pub(super) fn arguments(exe: &str) -> String {
+    format!("<array><string>{}</string></array>", xml(exe))
+}
+
+pub(super) fn environment(data_dir: &str) -> String {
     format!(
-        "<array><string>{}</string><string>--start-hidden</string>\
-        <string>--data-dir</string><string>{}</string></array>",
-        xml(exe),
-        xml(data_dir)
+        "<dict>        <key>{hidden}</key><string>1</string>        <key>{data}</key><string>{dir}</string>        </dict>",
+        hidden = crate::launch_env::START_HIDDEN,
+        data = crate::launch_env::DATA_DIR,
+        dir = xml(data_dir),
     )
 }
 
@@ -163,6 +167,7 @@ pub(super) fn parse(content: &str, label: &str, data_dir: &Path) -> Option<Entry
     let mut keys = std::collections::HashSet::new();
     let mut label_seen = false;
     let mut arguments_seen = false;
+    let mut environment_seen = false;
     let mut executable = None;
     let mut disabled = false;
     for pair in dict.children.as_chunks::<2>().0 {
@@ -180,26 +185,52 @@ pub(super) fn parse(content: &str, label: &str, data_dir: &Path) -> Option<Entry
             "ProgramArguments" => {
                 if value.tag != "array"
                     || !value.text.trim().is_empty()
-                    || value.children.len() != 4
+                    || value.children.len() != 1
                 {
                     return None;
                 }
-                let args = &value.children;
-                if args
-                    .iter()
-                    .any(|arg| arg.tag != "string" || !arg.children.is_empty())
-                    || args[1].text != "--start-hidden"
-                    || args[2].text != "--data-dir"
-                    || Path::new(&args[3].text) != data_dir
-                {
+                let arg = &value.children[0];
+                if arg.tag != "string" || !arg.children.is_empty() {
                     return None;
                 }
-                let exe = Path::new(&args[0].text);
+                let exe = Path::new(&arg.text);
                 if !exe.is_absolute() || !matches!(exe.file_name()?.to_str()?, "ElegantClipboard") {
                     return None;
                 }
                 executable = Some(exe.to_path_buf());
                 arguments_seen = true;
+            }
+            "EnvironmentVariables" => {
+                if value.tag != "dict" || !value.text.trim().is_empty() {
+                    return None;
+                }
+                let mut hidden = false;
+                let mut data_ok = false;
+                for pair in value.children.as_chunks::<2>().0 {
+                    let (key, item) = (&pair[0], &pair[1]);
+                    if key.tag != "key" || item.tag != "string" {
+                        return None;
+                    }
+                    match key.text.as_str() {
+                        name if name == crate::launch_env::START_HIDDEN => {
+                            if item.text != "1" {
+                                return None;
+                            }
+                            hidden = true;
+                        }
+                        name if name == crate::launch_env::DATA_DIR => {
+                            if Path::new(&item.text) != data_dir {
+                                return None;
+                            }
+                            data_ok = true;
+                        }
+                        _ => return None,
+                    }
+                }
+                if !hidden || !data_ok {
+                    return None;
+                }
+                environment_seen = true;
             }
             "Program" => return None,
             "Disabled" => {
@@ -214,7 +245,7 @@ pub(super) fn parse(content: &str, label: &str, data_dir: &Path) -> Option<Entry
             _ => (),
         }
     }
-    if !label_seen || !arguments_seen {
+    if !label_seen || !arguments_seen || !environment_seen {
         return None;
     }
     Some(Entry {

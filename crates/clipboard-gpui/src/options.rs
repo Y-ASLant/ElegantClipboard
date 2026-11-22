@@ -1,195 +1,88 @@
 use anyhow::{Result, bail};
-use std::{ffi::OsString, path::PathBuf};
+use std::path::PathBuf;
 
+/// GUI launch mode from process environment only. Command-line argv is ignored.
 pub struct Options {
     pub data_dir: Option<PathBuf>,
     pub monitor: bool,
     pub smoke_test: bool,
     pub start_hidden: bool,
-    /// 提权重启携带：启动时多等一会儿让旧实例释放单实例锁。
+    /// One-shot: wait longer for the previous instance to release its lock.
     pub wait_for_instance: bool,
-    pub import_db: Option<PathBuf>,
-    pub import_backup: Option<PathBuf>,
-    pub import_legacy_backup: Option<PathBuf>,
 }
 
 impl Options {
-    pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Option<Self>> {
-        let mut options = Self {
-            data_dir: None,
-            monitor: true,
-            smoke_test: false,
-            start_hidden: false,
+    pub fn from_env() -> Result<Self> {
+        let smoke_test = clipboard_platform::launch_env::smoke_test();
+        let data_dir = clipboard_platform::launch_env::data_dir();
+        if smoke_test && data_dir.is_none() {
+            bail!("冒烟测试需要设置环境变量 ELEGANTCLIPBOARD_DATA_DIR");
+        }
+        if smoke_test && clipboard_platform::launch_env::start_hidden() {
+            bail!("冒烟测试不能与 ELEGANTCLIPBOARD_START_HIDDEN 同时使用");
+        }
+        Ok(Self {
+            data_dir,
+            monitor: clipboard_platform::launch_env::monitor(),
+            smoke_test,
+            start_hidden: clipboard_platform::launch_env::start_hidden(),
             wait_for_instance: false,
-            import_db: None,
-            import_backup: None,
-            import_legacy_backup: None,
-        };
-        let mut args = args.into_iter();
-        while let Some(arg) = args.next() {
-            match arg.to_str() {
-                Some("--help" | "-h") => return Ok(None),
-                Some("--data-dir") => {
-                    options.data_dir = Some(required_path(&mut args, "--data-dir", "目录路径")?);
-                }
-                Some("--no-monitor") => options.monitor = false,
-                Some("--smoke-test") => options.smoke_test = true,
-                Some("--start-hidden") => options.start_hidden = true,
-                Some("--wait-for-instance") => options.wait_for_instance = true,
-                Some("--import-db") => {
-                    options.import_db = Some(required_path(
-                        &mut args,
-                        "--import-db",
-                        "旧版 clipboard.db 路径",
-                    )?);
-                }
-                Some("--import-backup") => {
-                    options.import_backup =
-                        Some(required_path(&mut args, "--import-backup", "ZIP 备份路径")?);
-                }
-                Some("--import-legacy-backup") => {
-                    options.import_legacy_backup = Some(required_path(
-                        &mut args,
-                        "--import-legacy-backup",
-                        "旧版 ZIP 备份路径",
-                    )?);
-                }
-                _ => bail!("未知参数：{}", arg.to_string_lossy()),
-            }
-        }
-        if options.smoke_test {
-            if options.start_hidden {
-                bail!("--smoke-test 不能与 --start-hidden 同时使用");
-            }
-            if options.import_db.is_some()
-                || options.import_backup.is_some()
-                || options.import_legacy_backup.is_some()
-            {
-                bail!("--smoke-test 不能与导入选项同时使用");
-            }
-            if options.data_dir.is_none() {
-                bail!("--smoke-test 必须指定独立的 --data-dir");
-            }
-            options.monitor = false;
-        }
-        let import_count = [
-            options.import_db.is_some(),
-            options.import_backup.is_some(),
-            options.import_legacy_backup.is_some(),
-        ]
-        .into_iter()
-        .filter(|selected| *selected)
-        .count();
-        if import_count > 1 {
-            bail!("每次只能选择一种导入方式");
-        }
-        if (options.import_backup.is_some() || options.import_legacy_backup.is_some())
-            && options.data_dir.is_none()
-        {
-            bail!("ZIP 备份导入必须指定独立的 --data-dir");
-        }
-        Ok(Some(options))
+        })
     }
-}
-
-fn required_path(
-    args: &mut impl Iterator<Item = OsString>,
-    argument: &str,
-    expected: &str,
-) -> Result<PathBuf> {
-    let Some(path) = args
-        .next()
-        .filter(|path| !path.is_empty() && !path.to_string_lossy().starts_with("--"))
-    else {
-        bail!("{argument} 需要{expected}");
-    };
-    Ok(path.into())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
 
-    fn parse(args: &[&str]) -> Result<Option<Options>> {
-        Options::parse(args.iter().map(OsString::from))
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn clear_launch_env() {
+        use clipboard_platform::launch_env::{DATA_DIR, NO_MONITOR, SMOKE_TEST, START_HIDDEN};
+        for name in [DATA_DIR, NO_MONITOR, SMOKE_TEST, START_HIDDEN] {
+            // SAFETY: tests hold ENV_LOCK; no other threads read these keys here.
+            unsafe { std::env::remove_var(name) };
+        }
     }
 
     #[test]
-    fn smoke_test_requires_explicit_data_and_disables_capture() -> Result<()> {
-        assert!(parse(&["--smoke-test"]).is_err());
-        let options = parse(&["--smoke-test", "--data-dir", "C:\\测试 目录"])?.unwrap();
+    fn env_smoke_requires_data_dir_and_disables_monitor() -> Result<()> {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_launch_env();
+        // SAFETY: exclusive ENV_LOCK.
+        unsafe {
+            std::env::set_var(clipboard_platform::launch_env::SMOKE_TEST, "1");
+        }
+        assert!(Options::from_env().is_err());
+        // SAFETY: exclusive ENV_LOCK.
+        unsafe {
+            std::env::set_var(clipboard_platform::launch_env::DATA_DIR, r"C:\isolated");
+        }
+        let options = Options::from_env()?;
+        assert!(options.smoke_test);
         assert!(!options.monitor);
         assert!(!options.start_hidden);
-        assert_eq!(options.data_dir, Some(PathBuf::from("C:\\测试 目录")));
-        assert!(parse(&["--data-dir"]).is_err());
-        assert!(parse(&["--data-dir", "--no-monitor"]).is_err());
-        assert!(parse(&["--unknown"]).is_err());
-        assert!(parse(&["--smoke-test", "--start-hidden", "--data-dir", "isolated"]).is_err());
-        assert!(parse(&["--start-hidden"])?.unwrap().start_hidden);
-        assert!(parse(&["--import-db"]).is_err());
-        assert!(parse(&["--import-backup"]).is_err());
-        assert!(parse(&["--import-backup", "history.zip"]).is_err());
-        assert!(parse(&["--import-legacy-backup"]).is_err());
-        assert!(parse(&["--import-legacy-backup", "old.zip"]).is_err());
-        assert!(
-            parse(&[
-                "--data-dir",
-                "empty",
-                "--import-db",
-                "old.db",
-                "--import-backup",
-                "history.zip"
-            ])
-            .is_err()
-        );
         assert_eq!(
-            parse(&["--data-dir", "empty", "--import-backup", "history.zip"])?
-                .unwrap()
-                .import_backup,
-            Some(PathBuf::from("history.zip"))
+            options.data_dir.as_deref(),
+            Some(std::path::Path::new(r"C:\isolated"))
         );
-        assert_eq!(
-            parse(&["--data-dir", "empty", "--import-legacy-backup", "old.zip"])?
-                .unwrap()
-                .import_legacy_backup,
-            Some(PathBuf::from("old.zip"))
-        );
-        assert!(
-            parse(&[
-                "--data-dir",
-                "empty",
-                "--import-backup",
-                "new.zip",
-                "--import-legacy-backup",
-                "old.zip"
-            ])
-            .is_err()
-        );
-        assert!(
-            parse(&[
-                "--data-dir",
-                "empty",
-                "--smoke-test",
-                "--import-legacy-backup",
-                "old.zip"
-            ])
-            .is_err()
-        );
-        assert!(
-            parse(&[
-                "--smoke-test",
-                "--data-dir",
-                "isolated",
-                "--import-db",
-                "old.db"
-            ])
-            .is_err()
-        );
-        assert_eq!(
-            parse(&["--import-db", "old.db"])?.unwrap().import_db,
-            Some(PathBuf::from("old.db"))
-        );
-        assert!(parse(&["--help"])?.is_none());
+        clear_launch_env();
+        Ok(())
+    }
+
+    #[test]
+    fn start_hidden_from_env() -> Result<()> {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_launch_env();
+        // SAFETY: exclusive ENV_LOCK.
+        unsafe {
+            std::env::set_var(clipboard_platform::launch_env::START_HIDDEN, "1");
+        }
+        let options = Options::from_env()?;
+        assert!(options.start_hidden);
+        assert!(options.monitor);
+        clear_launch_env();
         Ok(())
     }
 }

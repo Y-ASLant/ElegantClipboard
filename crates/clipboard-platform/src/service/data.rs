@@ -2,7 +2,6 @@ use super::DataSizeInfo;
 use anyhow::{Context, Result, bail};
 use clipboard_core::{
     backup::{RestoreReport, restore_backup},
-    import::{ImportReport, import_legacy_database},
     legacy_backup::{LegacyBackupReport, import_legacy_backup},
 };
 use std::{
@@ -37,21 +36,10 @@ pub fn show_existing_instance(data_dir: Option<PathBuf>) -> Result<bool> {
     super::data_directory::show_existing(data_dir)
 }
 
-/// Default data directory for an explicit `--data-dir`, or the current default
+/// Default data directory for an ELEGANTCLIPBOARD_DATA_DIR, or the current default
 /// when none is given. Does not migrate, lock, or create the directory.
 pub fn resolve_data_directory(data_dir: Option<&Path>) -> Result<PathBuf> {
     super::data_directory::resolve(data_dir)
-}
-
-pub fn import_legacy_data(
-    source: &Path,
-    data_dir: Option<PathBuf>,
-) -> Result<(PathBuf, ImportReport)> {
-    let prepared = super::data_directory::prepare(data_dir)?;
-    let _instance_lock = prepared.lock;
-    let destination = prepared.path.join("clipboard.db");
-    let report = import_legacy_database(source, &destination)?;
-    Ok((destination, report))
 }
 
 pub fn restore_backup_data(source: &Path, data_dir: PathBuf) -> Result<(PathBuf, RestoreReport)> {

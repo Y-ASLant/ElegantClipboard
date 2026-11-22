@@ -17,7 +17,7 @@ ElegantClipboard 是使用 Rust、GPUI 和 gpui-kit 构建的原生剪贴板管�
 - 分组与条目管理：收藏、置顶，分组可新建、重命名、删除和排序；卡片两侧区域拖拽排序、多选批量删除与清理历史；卡片预览行数、时间格式、字符数、大小与来源显示均可配置
 - 独立悬停预览：透明、鼠标穿透且不抢焦点的浮层，优先显示在主窗口侧边；Ctrl＋滚轮缩放图片或滚动文本，离开来源卡片即关闭；普通文件只保存原始路径，原件移动或删除后提示路径失效
 - 界面：简体中文/English、明暗主题、组件圆角选项、毛玻璃/云母/不透明背景材质（按平台能力提供）、窗口置顶/点击外部隐藏/唤出位置；无边框主窗口可按住搜索框上方握柄拖动，向下滚动后可一键返回顶部；快速粘贴默认关闭，普通记录和收藏各 10 个槽位默认未绑定，粘贴键与**受控/连贴投递节奏**均可自定义（默认受控）
-- 数据管理：备份导出为 GPUI ZIP，支持恢复 GPUI/旧版备份或导入旧数据库到独立空目录；按分组配置数量与天数保留上限，保护收藏与置顶；全局快捷键显隐切换、系统托盘、开机启动、暂停采集和单实例唤回
+- 数据管理：备份导出为 GPUI ZIP，支持恢复 GPUI/旧版 ZIP 备份到独立空目录；按分组配置数量与天数保留上限，保护收藏与置顶；全局快捷键显隐切换、系统托盘、开机启动、暂停采集和单实例唤回
 
 已知限制：HTML 预览中引用 http(s) 的远程图片不加载；编辑 HTML 条目保存后降级为纯文本；图片回贴的临时文件位于数据目录 `image_tmp/`，启动时自动清扫。个别应用（如微信）以延迟渲染方式广播图片格式而不提供数据，此类复制无法采集、静默跳过，不弹错误提示。
 
@@ -79,10 +79,12 @@ just run    # 或 cargo run -p ElegantClipboard --locked
 | macOS | `~/Library/Application Support/ElegantClipboard` |
 | Linux | `$XDG_DATA_HOME/elegantclipboard`（默认 `~/.local/share/elegantclipboard`） |
 
-旧版本数据目录和开机启动项不自动搬迁；1.2.10 的历史可导入旧数据库或旧版 ZIP。启动时清理历史 `staged` 文件副本及其数据库引用，保留原始路径。`--data-dir` 显式指定后原样使用：
+旧版本数据目录和开机启动项不自动搬迁；1.2.10 的历史请用旧版 ZIP 导入。启动时清理历史 `staged` 文件副本及其数据库引用，保留原始路径。隔离数据目录用环境变量（无命令行参数）：
 
 ```powershell
-cargo run -p ElegantClipboard --locked -- --no-monitor --data-dir .\target\gpui-check
+$env:ELEGANTCLIPBOARD_DATA_DIR = "$pwd\target\gpui-check"
+$env:ELEGANTCLIPBOARD_NO_MONITOR = "1"
+cargo run -p ElegantClipboard --locked
 ```
 
 ## 诊断日志

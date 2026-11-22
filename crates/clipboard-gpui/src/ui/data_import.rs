@@ -3,7 +3,6 @@ use anyhow::{Context as _, bail};
 
 #[derive(Clone, Copy)]
 pub(super) enum ImportSource {
-    LegacyDatabase,
     LegacyBackup,
     Backup,
 }
@@ -36,17 +35,18 @@ impl ImportOutcome {
                 self.directory.display()
             )
         };
-        match self.attachments {
-            Some(count) => description.push_str(&if language == LanguagePreference::English {
-                format!("; {count} image/icon attachments restored; {} missing", self.missing)
+        if let Some(count) = self.attachments {
+            description.push_str(&if language == LanguagePreference::English {
+                format!(
+                    "; {count} image/icon attachments restored; {} missing",
+                    self.missing
+                )
             } else {
-                format!("；已恢复 {count} 个图片或图标附件，缺失 {} 个", self.missing)
-            }),
-            None => description.push_str(tr(
-                language,
-                "；仅复制数据库，附件仍依赖原路径，请保留旧版媒体目录",
-                "; database only: attachments still use their original paths; keep the old media folders",
-            )),
+                format!(
+                    "；已恢复 {count} 个图片或图标附件，缺失 {} 个",
+                    self.missing
+                )
+            });
         }
         if self.blobs != 0 || self.missing_blobs != 0 {
             let blobs = self.blobs;
@@ -70,9 +70,6 @@ impl ClipboardView {
         let language = self.language;
         let current_directory = self.service.data_dir.clone();
         let prompt = match source {
-            ImportSource::LegacyDatabase => {
-                tr(language, "选择旧版数据库", "Select legacy database")
-            }
             ImportSource::LegacyBackup => {
                 tr(language, "选择旧版 ZIP 备份", "Select legacy ZIP backup")
             }
@@ -144,11 +141,10 @@ impl ClipboardView {
             return;
         };
         let result = std::env::current_exe().and_then(|executable| {
-            std::process::Command::new(executable)
-                .arg("--data-dir")
-                .arg(&outcome.directory)
-                .arg("--no-monitor")
-                .spawn()
+            let mut command = std::process::Command::new(executable);
+            clipboard_platform::launch_env::apply(&mut command, Some(&outcome.directory));
+            clipboard_platform::launch_env::apply_no_monitor(&mut command);
+            command.spawn()
         });
         match result {
             Ok(_) => {
@@ -214,11 +210,6 @@ fn import_to_directory(
         }
     }
     let (items, attachments, missing, blobs, missing_blobs) = match source {
-        ImportSource::LegacyDatabase => {
-            let (_, report) =
-                clipboard_platform::import_legacy_data(path, Some(directory.clone()))?;
-            (report.total_items, None, 0, 0, 0)
-        }
         ImportSource::LegacyBackup => {
             let (_, report) =
                 clipboard_platform::import_legacy_backup_data(path, directory.clone())?;

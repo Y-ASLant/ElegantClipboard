@@ -17,7 +17,7 @@ ElegantClipboard is a native clipboard manager built with Rust, GPUI, and gpui-k
 - Groups and entries: favorites, pins, and groups that can be created, renamed, deleted, and reordered; cards sort by dragging either edge, batch-select for deletion or cleanup; card preview lines, time format, character count, size, and source display are all configurable
 - Standalone hover previews: a transparent, mouse-passthrough, nonactivating layer placed beside the main window; Ctrl+wheel zooms images or scrolls text and leaving the source card closes it; regular files store only their original paths, reporting moved or deleted sources as unavailable
 - Interface: Simplified Chinese/English, light/dark themes, corner-radius options, frosted-glass/mica/opaque background materials (per platform capability), always-on-top, hide-on-outside-click and opening-position options; the borderless main window drags by a grip above the search box and offers a return-to-top button after scrolling; quick paste is off by default, and all ten recent and ten favorite slots start unbound
-- Data management: backups export as GPUI ZIP and can restore GPUI/legacy backups or import an old database into a separate empty directory; per-group count and age limits protect favorites and pinned items; global shortcut, tray, autostart, capture pause, and single-instance activation
+- Data management: backups export as GPUI ZIP and can restore GPUI or legacy ZIP backups into a separate empty directory; per-group count and age limits protect favorites and pinned items; global shortcut, tray, autostart, capture pause, and single-instance activation
 
 Known limitations: remote http(s) images in HTML previews do not load; editing an HTML entry saves it as plain text; paste-back temporary image files live under `image_tmp/` in the data directory and are swept at startup. Some apps (e.g. WeChat) advertise an image format but delay-render it without data — such copies cannot be captured and are skipped silently, without an error banner.
 
@@ -79,10 +79,12 @@ Default data directories:
 | macOS | `~/Library/Application Support/ElegantClipboard` |
 | Linux | `$XDG_DATA_HOME/elegantclipboard` (default `~/.local/share/elegantclipboard`) |
 
-Old data directories and login entries are not migrated automatically; history from the latest 1.x release can be imported from its database or a legacy ZIP. Startup removes legacy `staged` file copies and their database references while keeping original paths. An explicit `--data-dir` is used as given:
+Old data directories and login entries are not migrated automatically; history from the latest 1.x release can be imported from a legacy ZIP. Startup removes legacy `staged` file copies and their database references while keeping original paths. Use environment variables for an isolated data directory (no CLI flags):
 
 ```powershell
-cargo run -p ElegantClipboard --locked -- --no-monitor --data-dir .\target\gpui-check
+$env:ELEGANTCLIPBOARD_DATA_DIR = "$pwd\target\gpui-check"
+$env:ELEGANTCLIPBOARD_NO_MONITOR = "1"
+cargo run -p ElegantClipboard --locked
 ```
 
 ## Diagnostic logs

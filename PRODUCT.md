@@ -33,7 +33,7 @@ Claims neighboring clipboard tools cannot truthfully copy as a set:
 - Typical scene: user is mid-edit in another app → summons history → search/select → paste back or drag out.
 - First run: three-step onboarding in the main panel (language, shortcuts practice on isolated demo data, theme/autostart preferences).
 - Settings domains: general, display, appearance, data, app filter, sound, shortcuts, about.
-- Data lives in OS-standard app data dirs; backups are GPUI ZIP; legacy 1.2.10 DB/ZIP import into an empty directory is supported. Old data dirs and autostart entries are not auto-migrated.
+- Data lives in OS-standard app data dirs; backups are GPUI ZIP; legacy 1.2.10 ZIP import into an empty directory is supported. Old data dirs and autostart entries are not auto-migrated.
 - Windows-only: optional relaunch elevated (UAC) to interact with elevated target apps.
 
 ## Capabilities and Constraints

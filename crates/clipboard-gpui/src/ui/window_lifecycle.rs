@@ -436,7 +436,8 @@ impl ClipboardView {
             cx.notify();
             return;
         }
-        match clipboard_platform::elevation::relaunch_elevated(Some("--wait-for-instance")) {
+        let _ = clipboard_platform::launch_env::mark_wait_for_instance(&self.service.data_dir);
+        match clipboard_platform::elevation::relaunch_elevated() {
             Ok(()) => {
                 self.run_as_admin.value = true;
                 self.exiting.set(true);

@@ -147,18 +147,13 @@ impl SettingsWindowView {
         let open_owner = self.owner.clone();
         let choices = [
             (
-                "import-legacy-db",
-                tr(language, "导入旧版数据库…", "Import legacy database…"),
-                ImportSource::LegacyDatabase,
-            ),
-            (
                 "import-legacy-zip",
-                tr(language, "导入旧版 ZIP…", "Import legacy ZIP…"),
+                tr(language, "导入旧版 ZIP", "Import legacy ZIP"),
                 ImportSource::LegacyBackup,
             ),
             (
                 "restore-backup",
-                tr(language, "恢复备份…", "Restore backup…"),
+                tr(language, "恢复备份", "Restore backup"),
                 ImportSource::Backup,
             ),
         ];

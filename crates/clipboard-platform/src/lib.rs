@@ -18,6 +18,7 @@ mod instance;
 pub mod key_intercept;
 #[cfg(any(windows, target_os = "linux"))]
 mod key_intercept_types;
+pub mod launch_env;
 #[cfg(target_os = "linux")]
 pub mod linux;
 #[cfg(target_os = "macos")]

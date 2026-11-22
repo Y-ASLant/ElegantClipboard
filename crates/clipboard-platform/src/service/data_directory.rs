@@ -12,7 +12,7 @@ pub(super) struct DataDirectory {
     pub(super) lock: File,
 }
 
-/// 显式 `--data-dir` 原样使用，否则取当前默认目录。不创建、不加锁。
+/// 环境变量 ELEGANTCLIPBOARD_DATA_DIR 原样使用，否则取当前默认目录。不创建、不加锁。
 pub(super) fn resolve(explicit: Option<&Path>) -> Result<PathBuf> {
     if let Some(path) = explicit {
         return Ok(path.to_owned());

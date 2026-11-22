@@ -27,7 +27,10 @@ try {
     & codesign --verify --deep --strict $app
     if ($LASTEXITCODE -ne 0) { throw 'Packaged application signature verification failed.' }
     $executable = Join-Path $app 'Contents/MacOS/ElegantClipboard'
-    & $executable --smoke-test --data-dir (Join-Path $temporary 'data')
+    $env:ELEGANTCLIPBOARD_SMOKE_TEST = '1'
+    $env:ELEGANTCLIPBOARD_DATA_DIR = (Join-Path $temporary 'data')
+    $env:ELEGANTCLIPBOARD_NO_MONITOR = '1'
+    & $executable
     if ($LASTEXITCODE -ne 0) { throw 'Packaged application window smoke failed.' }
     Write-Output "DMG mount, Applications shortcut, signature and window smoke passed: $imagePath"
 } finally {

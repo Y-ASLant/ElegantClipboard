@@ -23,10 +23,13 @@ fn startup_name(data_dir: &Path) -> Result<String> {
 }
 
 fn command(exe: &Path, data_dir: &Path) -> String {
+    // cmd sets launch env then starts the GUI with no argv.
     format!(
-        "\"{}\" --start-hidden --data-dir \"{}\"",
-        exe.display(),
-        data_dir.display()
+        "cmd.exe /c set \"{hidden}=1\"&& set \"{data}={dir}\"&& start \"\" /B \"{exe}\"",
+        hidden = crate::launch_env::START_HIDDEN,
+        data = crate::launch_env::DATA_DIR,
+        dir = data_dir.display(),
+        exe = exe.display(),
     )
 }
 
@@ -43,23 +46,35 @@ fn belongs_to(value: &registry::Value, data_dir: &Path) -> bool {
     let Some(saved) = value.string() else {
         return false;
     };
-    let Some((exe, data)) = saved
-        .strip_prefix('"')
-        .and_then(|value| value.strip_suffix('"'))
-        .and_then(|value| value.split_once("\" --start-hidden --data-dir \""))
-    else {
-        return false;
-    };
-    let executable = Path::new(exe);
-    if !executable.is_absolute() || exe.contains(['"', '\0']) {
+    if saved.contains('\0') {
         return false;
     }
-    let executable = executable
+    let data_marker = format!("{}=", crate::launch_env::DATA_DIR);
+    let Some(after_data) = saved.split_once(&data_marker).map(|(_, rest)| rest) else {
+        return false;
+    };
+    let Some((data, rest)) = after_data.split_once("\"&& start \"\" /B \"") else {
+        return false;
+    };
+    let data = data.trim().trim_matches('"');
+    let Some(exe) = rest.strip_suffix('"') else {
+        return false;
+    };
+    if data.is_empty() || data.contains(['"', '\0']) || exe.is_empty() || exe.contains(['"', '\0'])
+    {
+        return false;
+    }
+    let executable = Path::new(exe);
+    if !executable.is_absolute() {
+        return false;
+    }
+    let name = executable
         .file_name()
         .map(|name| name.to_string_lossy().to_lowercase());
-    executable.as_deref() == Some("elegantclipboard.exe")
-        && !data.contains(['"', '\0'])
-        && path_key(Path::new(data)) == path_key(data_dir)
+    if name.as_deref() != Some("elegantclipboard.exe") {
+        return false;
+    }
+    path_key(Path::new(data)) == path_key(data_dir) && saved == command(executable, Path::new(data))
 }
 
 fn startup_value(data_dir: &Path) -> Result<registry::Value> {

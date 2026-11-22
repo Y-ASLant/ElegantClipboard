@@ -34,16 +34,17 @@ fn entry_path(base: &Path, label: &str) -> PathBuf {
 
 fn entry(exe: &Path, data_dir: &Path) -> Result<String> {
     let label = label(data_dir)?;
-    let arguments = plist::arguments(
-        exe.to_str().context("程序路径不是有效 UTF-8")?,
-        data_dir.to_str().context("数据目录不是有效 UTF-8")?,
-    );
+    let exe = exe.to_str().context("程序路径不是有效 UTF-8")?;
+    let data_dir = data_dir.to_str().context("数据目录不是有效 UTF-8")?;
+    let arguments = plist::arguments(exe);
+    let environment = plist::environment(data_dir);
     Ok(format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
          <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
          <plist version=\"1.0\"><dict>\n\
          <key>Label</key><string>{label}</string>\n\
          <key>ProgramArguments</key>{arguments}\n\
+         <key>EnvironmentVariables</key>{environment}\n\
          <key>RunAtLoad</key><true/>\n\
          <key>LimitLoadToSessionType</key><string>Aqua</string>\n\
          </dict></plist>\n"

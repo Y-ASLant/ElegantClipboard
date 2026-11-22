@@ -16,7 +16,7 @@ Windows 是主要验收平台，macOS 与 Linux 实现同仓构建（能力差�
 
 源码模块与维护边界见[工程文档](README.md)。所有 Rust 源码、示例和测试文件上限为 640 物理行，`scripts/check-source-size.ps1` 在 `just check` 与 GPUI CI 中强制检查；拆分按职责而不是编号或文本包含进行。
 
-默认数据目录为 `%LOCALAPPDATA%\ElegantClipboard`。不自动搬迁 2.0 beta 或 1.2.10 以外版本的数据目录和开机启动项；1.2.10 的数据库和 ZIP 可导入到空的数据目录。自动测试使用临时目录、合成文本和仓库内 PNG 样本。
+默认数据目录为 `%LOCALAPPDATA%\ElegantClipboard`。不自动搬迁 2.0 beta 或 1.2.10 以外版本的数据目录和开机启动项；1.2.10 的 ZIP 可导入到空的数据目录。自动测试使用临时目录、合成文本和仓库内 PNG 样本。
 
 ### Windows 历史窗口焦点
 
@@ -188,8 +188,8 @@ Release 以体积优先：`opt-level = "z"`、`lto = "fat"`、`codegen-units = 1
 
 - 导入只读访问旧库，使用 SQLite 在线备份获取含 WAL 的一致快照，在新目录升级副本并校验；GPUI 目录已有 `clipboard.db` 则拒绝覆盖。导入的外部图片与文件保留原路径。
 - 打开数据库只接受当前结构和 1.2.10：1.2.10 已有当前列且没有 2.0 表时只补 `note`，再由 schema 创建新表；更早的 1.x 及其他 2.0 beta 拒绝打开，不改原文件。
-- `--import-db` 导入单独的 1.2.10 `clipboard.db`（不复制外部媒体）；`--import-legacy-backup` 导入 1.2.10 Tauri ZIP（补备注列并创建 2.0 新表，重建 `images/`、`icons/`；旧 `staged/` 跳过且引用移除）。
-- "导出备份"保存 v2 GPUI ZIP：在线 SQLite 快照、引用的可读取图片、图标和原生格式 blob；默认排除非 GPUI 设置（包括旧库潜在的密码或 token），源资产缺失时显示数量。恢复用 `--import-backup <备份.zip> --data-dir <空目录>`，兼容 v1/v2；创建暂存文件前拒绝重复归档路径、超过 10 万项或展开后超过 50 GiB 的备份，随后验证格式、数据库与资产引用并完成 WAL checkpoint，检查失败不安装。
+- 设置「导入与恢复」导入 1.2.10 Tauri ZIP（补备注列并创建 2.0 新表，重建 `images/`、`icons/`；旧 `staged/` 跳过且引用移除）。
+- "导出备份"保存 v2 GPUI ZIP：在线 SQLite 快照、引用的可读取图片、图标和原生格式 blob；默认排除非 GPUI 设置（包括旧库潜在的密码或 token），源资产缺失时显示数量。设置「恢复备份」写入空目录，兼容 v1/v2；创建暂存文件前拒绝重复归档路径、超过 10 万项或展开后超过 50 GiB 的备份，随后验证格式、数据库与资产引用并完成 WAL checkpoint，检查失败不安装。
 - 同一数据目录下再次启动唤回已有窗口并退出第二个进程；指定另一数据目录可并行运行隔离实例，不同实例间全局快捷键只能由一个注册。
 
 ### 删除与清理
@@ -224,13 +224,11 @@ cargo run -p clipboard-platform --example isolated_clipboard_smoke --locked
 cargo run -p ElegantClipboard --locked
 
 # 隔离检查：禁用采集，只浏览指定目录中的历史
-cargo run -p ElegantClipboard --locked -- --no-monitor --data-dir .\target\gpui-check
+$env:ELEGANTCLIPBOARD_DATA_DIR="$pwd\target\gpui-check"; $env:ELEGANTCLIPBOARD_NO_MONITOR="1"; cargo run -p ElegantClipboard --locked
 
 # 窗口冒烟：禁用采集，约 3 秒后自动退出
-cargo run -p ElegantClipboard --locked -- --smoke-test --data-dir .\target\gpui-smoke
+在 PowerShell 中：$env:ELEGANTCLIPBOARD_SMOKE_TEST=1; $env:ELEGANTCLIPBOARD_DATA_DIR="$pwd\target\gpui-smoke"; cargo run -p ElegantClipboard --locked
 
-# 从旧版数据库导入到尚无 clipboard.db 的 GPUI 数据目录；命令完成后退出
-cargo run -p ElegantClipboard --locked -- --import-db "C:\旧版目录\clipboard.db"
 ```
 
 打包脚本仅接受 Windows x64 MSVC 构建，使用锁定依赖生成 `target/packages/ElegantClipboard-v<版本>-windows-x64.zip` 与同名的 NSIS `*-setup.exe` 及各自 `.sha256`。压缩包含 exe、许可证和运行说明；安装包为当前用户安装，目录是 `%LOCALAPPDATA%\Programs\ElegantClipboard`，与数据目录分开，卸载不删除历史数据。两者均未经签名，不包含自动更新。

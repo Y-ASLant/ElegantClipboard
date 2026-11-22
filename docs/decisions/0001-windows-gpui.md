@@ -41,7 +41,7 @@ Windows 正文使用 Microsoft YaHei UI，颜色跟随 Kit 当前主题；选中
 - 无自动粘贴到目标窗口；复制成功后用户切换应用按 Ctrl+V。
 - 无自动迁移旧版数据，默认使用独立 GPUI 目录。
 - 无全局快捷键、托盘、图片/文件/富文本卡片、同步和翻译。
-- `--no-monitor` 仅禁用采集，用户点击“复制”仍会主动写剪贴板。
+- `ELEGANTCLIPBOARD_NO_MONITOR=1` 仅禁用采集，用户点击“复制”仍会主动写剪贴板。
 - 冒烟测试必须指定独立目录，自动禁用采集并在短暂运行后退出。
 
 参考：[Kit 官方入门](https://gpui-kit.com/docs/getting-started/)、本地锁文件与已下载的 gpui-kit/gpui-base 0.6.2 源码。
