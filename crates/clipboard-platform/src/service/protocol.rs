@@ -228,6 +228,7 @@ pub enum Command {
     QueryDataSize,
     QueryDailyCounts(String),
     OptimizeDatabase,
+    ResetApplicationSettings,
     OpenDataDirectory,
     ExportBackup(PathBuf),
     Reorder {
@@ -317,6 +318,7 @@ pub enum FailureKind {
     SaveAs(i64),
     DataSize,
     DatabaseMaintenance,
+    ResetSettings,
     Pause,
     Update,
     Other,
@@ -368,6 +370,7 @@ impl Command {
             Self::QueryDataSize => Some(FailureKind::DataSize),
             Self::QueryDailyCounts(_) => Some(FailureKind::Other),
             Self::OptimizeDatabase => Some(FailureKind::DatabaseMaintenance),
+            Self::ResetApplicationSettings => Some(FailureKind::ResetSettings),
             Self::CheckUpdate | Self::DownloadUpdate(_) | Self::InstallUpdate(_) => {
                 Some(FailureKind::Update)
             }
@@ -496,6 +499,7 @@ pub enum Event {
     DataSize(Result<DataSizeInfo, String>),
     DailyCounts(Result<Vec<(String, i64)>, String>),
     DatabaseOptimized(DataSizeInfo),
+    ApplicationSettingsReset(Result<(), String>),
     BackupExported(Result<BackupReport, String>),
     BackgroundError(String),
     CommandFailed {

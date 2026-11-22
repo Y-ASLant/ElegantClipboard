@@ -143,6 +143,7 @@ impl SettingsWindowView {
         };
         let language = owner.language;
         let pending = owner.data_import_pending;
+        let reset_pending = owner.reset_settings_pending;
         let outcome = owner.data_import_result.as_ref();
         let open_owner = self.owner.clone();
         let choices = [
@@ -157,20 +158,23 @@ impl SettingsWindowView {
                 ImportSource::Backup,
             ),
         ];
+        let busy = pending || reset_pending;
         settings_stack()
             .child(
-                settings_inline().children(choices.into_iter().map(|(id, label, source)| {
-                    let owner = self.owner.clone();
-                    Button::new(id)
-                        .outline()
-                        .h(px(visual::CONTROL_HEIGHT))
-                        .label(label)
-                        .disabled(pending)
-                        .on_click(move |_, _, cx| {
-                            let _ = owner
-                                .update(cx, |owner, cx| owner.start_data_import(source, cx));
-                        })
-                })),
+                settings_inline()
+                    .children(choices.into_iter().map(|(id, label, source)| {
+                        let owner = self.owner.clone();
+                        Button::new(id)
+                            .outline()
+                            .h(px(visual::CONTROL_HEIGHT))
+                            .label(label)
+                            .disabled(busy)
+                            .on_click(move |_, _, cx| {
+                                let _ = owner
+                                    .update(cx, |owner, cx| owner.start_data_import(source, cx));
+                            })
+                    }))
+                    .child(self.reset_settings_button(language, reset_pending, pending)),
             )
             .when(pending, |content| {
                 content.child(settings_description(tr(language, "正在选择路径或恢复数据…", "Selecting paths or restoring data…"), cx))
@@ -195,7 +199,7 @@ impl SettingsWindowView {
                         settings_inline().child(
                             Button::new("open-restored-data").outline().h(px(visual::CONTROL_HEIGHT))
                                 .label(tr(language, "预览恢复的数据", "Preview restored data"))
-                                .disabled(pending)
+                                .disabled(busy)
                                 .on_click(move |_, _, cx| {
                                     let _ = open_owner.update(cx, |owner, cx| owner.open_imported_data(cx));
                                 }),
@@ -203,6 +207,111 @@ impl SettingsWindowView {
                     )
             })
             .into_any_element()
+    }
+
+    fn reset_settings_button(
+        &self,
+        language: LanguagePreference,
+        reset_pending: bool,
+        import_pending: bool,
+    ) -> Button {
+        let owner = self.owner.clone();
+        Button::new("settings-reset-app")
+            .outline()
+            .h(px(visual::CONTROL_HEIGHT))
+            .label(tr(language, "重置应用", "Reset app"))
+            .tooltip(tr(
+                language,
+                "恢复默认设置，保留剪贴板历史",
+                "Restore default settings; keep clipboard history",
+            ))
+            .disabled(reset_pending || import_pending)
+            .on_click(move |_, window, cx| {
+                let dialog_owner = owner.clone();
+                let _ = dialog_owner.update(cx, |owner, cx| {
+                    owner.reset_settings_error = None;
+                    cx.notify();
+                });
+                window.open_dialog(cx, move |dialog, _, cx| {
+                    let (pending, error) = dialog_owner
+                        .upgrade()
+                        .map(|owner| {
+                            let owner = owner.read(cx);
+                            (owner.reset_settings_pending, owner.reset_settings_error.clone())
+                        })
+                        .unwrap_or((false, None));
+                    let confirm_owner = dialog_owner.clone();
+                    let keyboard_owner = dialog_owner.clone();
+                    let cancel_owner = dialog_owner.clone();
+                    dialog_shell(dialog, cx)
+                        .title(dialog_title(
+                            tr(language, "重置应用设置？", "Reset app settings?"),
+                            cx,
+                        ))
+                        .on_ok(move |_, window, cx| {
+                            let _ = keyboard_owner.update(cx, |owner, cx| {
+                                owner.confirm_reset_settings(cx);
+                            });
+                            window.refresh();
+                            false
+                        })
+                        .on_cancel(move |_, _, cx| {
+                            cancel_owner
+                                .upgrade()
+                                .is_none_or(|owner| !owner.read(cx).reset_settings_pending)
+                        })
+                        .child(
+                            dialog_copy()
+                                .flex()
+                                .flex_col()
+                                .gap_2()
+                                .child(tr(
+                                    language,
+                                    "主题、热键、粘贴与采集等设置将恢复默认。",
+                                    "Theme, hotkeys, paste, and capture settings return to defaults.",
+                                ))
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(tr(
+                                            language,
+                                            "剪贴板历史、分组与图片不会删除。完成后应用会自动重启。",
+                                            "Clipboard history, groups, and images are kept. The app restarts when done.",
+                                        )),
+                                )
+                                .when_some(error, |content, error| {
+                                    content.child(Alert::error("reset-settings-error", error).small())
+                                }),
+                        )
+                        .footer(
+                            dialog_footer(cx)
+                                .child(
+                                    Button::new("reset-settings-cancel")
+                                        .outline()
+                                        .label(tr(language, "取消", "Cancel"))
+                                        .disabled(pending)
+                                        .on_click(|_, window, cx| window.close_dialog(cx)),
+                                )
+                                .child(
+                                    Button::new("reset-settings-confirm")
+                                        .danger()
+                                        .label(if pending {
+                                            tr(language, "正在重置…", "Resetting…")
+                                        } else {
+                                            tr(language, "重置并重启", "Reset and restart")
+                                        })
+                                        .disabled(pending)
+                                        .on_click(move |_, window, cx| {
+                                            let _ = confirm_owner.update(cx, |owner, cx| {
+                                                owner.confirm_reset_settings(cx);
+                                            });
+                                            window.refresh();
+                                        }),
+                                ),
+                        )
+                });
+            })
     }
 
     fn clear_all_history_button(

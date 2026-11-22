@@ -421,6 +421,8 @@ struct ClipboardView {
     data_size_pending: bool,
     database_maintenance_pending: bool,
     export_pending: bool,
+    reset_settings_pending: bool,
+    reset_settings_error: Option<String>,
     data_import_pending: bool,
     data_import_result: Option<data_import::ImportOutcome>,
     window_position: PendingPref<WindowPositionPreference>,

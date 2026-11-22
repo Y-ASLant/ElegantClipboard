@@ -291,3 +291,22 @@ fn window_position_persists_and_unknown_values_follow_cursor() -> Result<()> {
     );
     Ok(())
 }
+
+#[test]
+fn reset_application_settings_preserves_history() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let history = crate::History::open(directory.path().join("clipboard.db"))?;
+    let id = history.capture("keep me")?.expect("captured");
+    Preferences::new(&history.db).set_theme(ThemePreference::Dark)?;
+    assert_eq!(
+        Preferences::new(&history.db).theme()?,
+        ThemePreference::Dark
+    );
+    history.reset_application_settings()?;
+    assert_eq!(
+        Preferences::new(&history.db).theme()?,
+        ThemePreference::System
+    );
+    assert_eq!(history.item(id)?.text_content.as_deref(), Some("keep me"));
+    Ok(())
+}

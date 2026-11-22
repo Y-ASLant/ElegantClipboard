@@ -48,4 +48,14 @@ impl SettingsRepository {
         tx.commit()?;
         Ok(())
     }
+
+    /// Drop every user preference row; keep `_migration_*` markers so data migrations do not replay.
+    pub fn clear_user_settings(&self) -> Result<(), rusqlite::Error> {
+        let conn = self.write_conn.lock();
+        conn.execute(
+            "DELETE FROM settings WHERE key NOT LIKE '\\_migration%' ESCAPE '\\'",
+            [],
+        )?;
+        Ok(())
+    }
 }

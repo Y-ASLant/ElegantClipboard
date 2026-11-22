@@ -147,7 +147,7 @@ fn display_preferences_survive_restart_and_recover_invalid_values() -> Result<()
 }
 
 #[test]
-fn missing_category_tabs_use_all_favorites_and_other() {
+fn missing_category_tabs_use_all_and_favorites_only() {
     assert_eq!(
         CategoryTabVisibility::default(),
         CategoryTabVisibility {
@@ -156,7 +156,7 @@ fn missing_category_tabs_use_all_favorites_and_other() {
             text: false,
             image: false,
             url: false,
-            other: true,
+            other: false,
         }
     );
     let parsed: CategoryTabVisibility =

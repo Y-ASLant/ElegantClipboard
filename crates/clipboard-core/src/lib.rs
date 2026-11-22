@@ -397,6 +397,11 @@ impl History {
             .ok_or_else(|| anyhow::anyhow!("记录已不存在"))
     }
 
+    /// Clear stored preferences only; history rows and media stay.
+    pub fn reset_application_settings(&self) -> Result<()> {
+        Preferences::new(&self.db).reset_application_settings()
+    }
+
     pub fn optimize_storage(&self) -> Result<()> {
         self.db.optimize().context("更新数据库统计失败")?;
         self.db.vacuum().context("回收数据库空闲空间失败")?;

@@ -496,6 +496,14 @@ impl Worker {
                 self.send_event(Event::DatabaseOptimized(size))?;
                 return Ok(());
             }
+            Command::ResetApplicationSettings => {
+                self.send_event(Event::ApplicationSettingsReset(
+                    self.history
+                        .reset_application_settings()
+                        .map_err(|error| error.to_string()),
+                ))?;
+                return Ok(());
+            }
             Command::OpenDataDirectory => {
                 open_data_directory(&self.data_dir)?;
                 self.send_event(Event::Status("已打开数据目录".into()))?;

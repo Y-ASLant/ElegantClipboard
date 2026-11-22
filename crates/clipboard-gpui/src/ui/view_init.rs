@@ -439,6 +439,8 @@ impl ClipboardView {
             data_size_pending: false,
             database_maintenance_pending: false,
             export_pending: false,
+            reset_settings_pending: false,
+            reset_settings_error: None,
             data_import_pending: false,
             data_import_result: None,
             window_position: PendingPref::new(window_position),

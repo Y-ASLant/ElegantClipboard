@@ -204,3 +204,18 @@ impl ClipboardView {
         true
     }
 }
+
+impl ClipboardView {
+    pub(super) fn confirm_reset_settings(&mut self, cx: &mut Context<Self>) {
+        if self.reset_settings_pending || self.data_import_pending {
+            return;
+        }
+        self.reset_settings_error = None;
+        if self.send(Command::ResetApplicationSettings, cx) {
+            self.reset_settings_pending = true;
+        } else {
+            self.reset_settings_error = Some(self.message.clone());
+        }
+        cx.notify();
+    }
+}

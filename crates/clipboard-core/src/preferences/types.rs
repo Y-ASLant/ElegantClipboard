@@ -323,7 +323,7 @@ impl Default for CategoryTabVisibility {
             text: false,
             image: false,
             url: false,
-            other: true,
+            other: false,
         }
     }
 }

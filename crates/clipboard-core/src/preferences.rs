@@ -84,6 +84,11 @@ impl Preferences {
             .set(key, if enabled { "true" } else { "false" })?)
     }
 
+    /// Restore preference defaults. History, groups, and media files are untouched.
+    pub fn reset_application_settings(&self) -> Result<()> {
+        Ok(self.repository.clear_user_settings()?)
+    }
+
     pub fn retention_saved(&self) -> Result<bool> {
         Ok(self.repository.get(RETENTION_KEY)?.is_some())
     }

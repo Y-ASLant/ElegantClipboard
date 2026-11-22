@@ -284,6 +284,24 @@ impl ClipboardView {
                 self.is_error = false;
                 true
             }
+            Event::ApplicationSettingsReset(result) => {
+                self.reset_settings_pending = false;
+                match result {
+                    Ok(()) => {
+                        self.reset_settings_error = None;
+                        self.restart_application(window, cx);
+                    }
+                    Err(error) => {
+                        self.reset_settings_error = Some(error.clone());
+                        self.set_feedback_message(format!(
+                            "{}: {error}",
+                            tr(self.language, "重置设置失败", "Failed to reset settings")
+                        ));
+                        self.is_error = true;
+                    }
+                }
+                true
+            }
             Event::Paused(paused) => {
                 self.paused = paused;
                 self.pause_pending = false;
@@ -406,6 +424,10 @@ impl ClipboardView {
             FailureKind::DataSize => self.data_size_pending = false,
             FailureKind::DatabaseMaintenance => {
                 self.database_maintenance_pending = false;
+            }
+            FailureKind::ResetSettings => {
+                self.reset_settings_pending = false;
+                self.reset_settings_error = Some(message.clone());
             }
             FailureKind::Pause => self.pause_pending = false,
             FailureKind::Update => self.update_check = UpdateCheck::Failed,
