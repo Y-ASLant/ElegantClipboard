@@ -76,7 +76,7 @@ impl SettingsWindowView {
             fn(&mut ClipboardView),
             Option<(&'static str, &'static str)>,
         );
-        let behavior_toggles: [BehaviorToggle; 7] = [
+        let behavior_toggles: [BehaviorToggle; 6] = [
             (
                 "persist-window-size",
                 "记住窗口大小",
@@ -134,20 +134,6 @@ impl SettingsWindowView {
                     "只清空搜索词、不动筛选与滚动；窗口未隐藏、只是唤回前台时也生效，适合长时间保持窗口显示的场景。",
                     "Clears only the search text, leaving the filter and scroll position; also applies when the visible window is merely brought back to front, which suits users who keep the window open.",
                 )),
-            ),
-            (
-                "skip-clear-confirm",
-                "清理历史免确认",
-                "Clear history without confirmation",
-                Command::SetSkipClearConfirm,
-                |state| {
-                    (
-                        state.skip_clear_confirm.value,
-                        state.skip_clear_confirm.pending,
-                    )
-                },
-                |owner| owner.skip_clear_confirm.pending = true,
-                None,
             ),
             (
                 "paste-close-window",

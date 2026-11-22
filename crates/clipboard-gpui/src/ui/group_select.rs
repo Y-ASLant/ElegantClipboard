@@ -188,7 +188,6 @@ impl ClipboardView {
                     .disabled(
                         self.group_save_pending
                             || self.group_delete_pending
-                            || self.clear_pending
                             || self.group_reorder_pending,
                     ),
             ))

@@ -91,7 +91,7 @@ pub fn restore_backup(archive_path: &Path, data_dir: &Path) -> Result<RestoreRep
             continue;
         }
         let media_path = stage.path().join(category).join(filename);
-        fs::create_dir_all(media_path.parent().unwrap())?;
+        fs::create_dir_all(media_path.parent().context("备份媒体路径无父目录")?)?;
         let copied = io::copy(&mut entry, &mut File::create(media_path)?)?;
         if copied != entry.size() {
             bail!("备份媒体条目长度不一致：{name}");

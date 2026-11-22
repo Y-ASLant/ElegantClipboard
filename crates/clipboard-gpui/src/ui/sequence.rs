@@ -45,7 +45,7 @@ impl ClipboardView {
         if !self.paste_state.start_sequence(ids, target) {
             return;
         }
-        if self.confirmation == Some(HistoryConfirmation::DeleteSelected) {
+        if self.confirmation == Some(HistoryConfirmation::Selection) {
             self.close_history_confirmation(window, cx);
         }
         if !self.advance_sequence(window, cx) {

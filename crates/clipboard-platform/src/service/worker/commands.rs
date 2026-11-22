@@ -291,13 +291,6 @@ impl Worker {
                     Event::SearchAutoClearSaved,
                 );
             }
-            Command::SetSkipClearConfirm(enabled) => {
-                return self.save_setting(
-                    enabled,
-                    Preferences::set_skip_clear_confirm,
-                    Event::SkipClearConfirmSaved,
-                );
-            }
             Command::SetPasteCloseWindow(enabled) => {
                 return self.save_setting(
                     enabled,

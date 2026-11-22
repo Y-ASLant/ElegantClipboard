@@ -104,7 +104,7 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) -> bool {
         self.group_delete_pending = false;
-        if matches!(self.confirmation, Some(HistoryConfirmation::DeleteGroup(_))) {
+        if matches!(self.confirmation, Some(HistoryConfirmation::Group(_))) {
             self.close_history_confirmation(window, cx);
         }
         match result {
@@ -174,20 +174,11 @@ impl ClipboardView {
     pub(super) fn apply_history_cleared(
         &mut self,
         result: Result<clipboard_core::DeletionOutcome, String>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
     ) -> bool {
-        self.clear_pending = false;
-        if matches!(
-            self.confirmation,
-            Some(HistoryConfirmation::ClearHistory(_))
-        ) {
-            self.close_history_confirmation(window, cx);
-        }
         match result {
-            Ok(outcome) => {
-                self.apply_cleanup_warning(outcome.cleanup_warning);
-            }
+            Ok(outcome) => self.apply_cleanup_warning(outcome.cleanup_warning),
             Err(error) => {
                 self.set_feedback_message(format!(
                     "{}: {error}",
@@ -247,7 +238,7 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) -> bool {
         self.batch_pending = false;
-        if self.confirmation == Some(HistoryConfirmation::DeleteSelected) {
+        if self.confirmation == Some(HistoryConfirmation::Selection) {
             self.close_history_confirmation(window, cx);
         }
         match result {

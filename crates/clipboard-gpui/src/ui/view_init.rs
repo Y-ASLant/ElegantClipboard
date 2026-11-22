@@ -201,7 +201,6 @@ impl ClipboardView {
         let auto_reset_state = service.initial_preferences.auto_reset_state;
         let search_auto_focus = service.initial_preferences.search_auto_focus;
         let search_auto_clear = service.initial_preferences.search_auto_clear;
-        let skip_clear_confirm = service.initial_preferences.skip_clear_confirm;
         let (paste_close_window, paste_key, paste_move_to_top, paste_delivery_mode) = (
             service.initial_preferences.paste_close_window,
             service.initial_preferences.paste_key,
@@ -348,7 +347,6 @@ impl ClipboardView {
             group_edit_error: None,
             group_reorder_pending: false,
             group_delete_pending: false,
-            clear_pending: false,
             clear_all_error: None,
             clear_all_pending: false,
             batch_mode: false,
@@ -450,7 +448,6 @@ impl ClipboardView {
             auto_reset_state: PendingPref::new(auto_reset_state),
             search_auto_focus: PendingPref::new(search_auto_focus),
             search_auto_clear: PendingPref::new(search_auto_clear),
-            skip_clear_confirm: PendingPref::new(skip_clear_confirm),
             paste_close_window: PendingPref::new(paste_close_window),
             paste_key: PendingPref::new(paste_key),
             paste_delivery_mode: PendingPref::new(paste_delivery_mode),

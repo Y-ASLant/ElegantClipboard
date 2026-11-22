@@ -346,7 +346,6 @@ impl ClipboardView {
         }
         if window.has_active_dialog(cx)
             || self.batch_pending
-            || self.clear_pending
             || self.clear_all_pending
             || self.history.loading
         {

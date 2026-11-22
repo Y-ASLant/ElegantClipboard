@@ -64,7 +64,7 @@ impl ClipboardView {
         self.history.selected = Some(id);
         window.focus(&self.list_focus, cx);
         self.selection_anchor = Some(id);
-        if self.confirmation == Some(HistoryConfirmation::DeleteSelected) {
+        if self.confirmation == Some(HistoryConfirmation::Selection) {
             self.close_history_confirmation(window, cx);
         }
         cx.notify();
@@ -134,7 +134,7 @@ impl ClipboardView {
             self.selected_ids.insert(id);
             self.selection_anchor = Some(id);
         }
-        if self.confirmation == Some(HistoryConfirmation::DeleteSelected) {
+        if self.confirmation == Some(HistoryConfirmation::Selection) {
             self.close_history_confirmation(window, cx);
         }
         cx.notify();
@@ -172,7 +172,7 @@ impl ClipboardView {
         if self.send(Command::Merge { ids, purpose }, cx) {
             self.batch_pending = true;
             self.paste_state.mark_merge_started();
-            if self.confirmation == Some(HistoryConfirmation::DeleteSelected) {
+            if self.confirmation == Some(HistoryConfirmation::Selection) {
                 self.close_history_confirmation(window, cx);
             }
             self.is_error = false;
@@ -183,7 +183,7 @@ impl ClipboardView {
     }
 
     pub(super) fn delete_selected(&mut self, cx: &mut Context<Self>) {
-        if !self.confirmation_active(HistoryConfirmation::DeleteSelected)
+        if !self.confirmation_active(HistoryConfirmation::Selection)
             || self.batch_pending
             || self.selected_ids.is_empty()
         {

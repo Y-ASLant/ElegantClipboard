@@ -8,7 +8,6 @@ impl ClipboardView {
             Command::Delete(_)
                 | Command::DeleteBatch { .. }
                 | Command::DeleteGroup { .. }
-                | Command::ClearHistory { .. }
                 | Command::ClearAllHistory
         ) {
             self.cancel_sequence(cx);
@@ -158,17 +157,6 @@ impl ClipboardView {
                     result,
                     |this| &mut this.search_auto_clear,
                     ("保存搜索清空失败", "Failed to save search clearing"),
-                );
-                true
-            }
-            Event::SkipClearConfirmSaved(result) => {
-                self.acknowledge_save(
-                    result,
-                    |this| &mut this.skip_clear_confirm,
-                    (
-                        "保存清理确认设置失败",
-                        "Failed to save clear confirmation setting",
-                    ),
                 );
                 true
             }
@@ -378,15 +366,12 @@ impl ClipboardView {
             }
             FailureKind::GroupDelete => {
                 self.group_delete_pending = false;
-                if matches!(self.confirmation, Some(HistoryConfirmation::DeleteGroup(_))) {
+                if matches!(self.confirmation, Some(HistoryConfirmation::Group(_))) {
                     self.close_history_confirmation(window, cx);
                 }
             }
             FailureKind::GroupMove => self.group_move_pending = false,
-            FailureKind::ClearHistory => {
-                self.clear_pending = false;
-                self.confirmation_error = Some(message.clone());
-            }
+            FailureKind::ClearHistory => {}
             FailureKind::ClearAllHistory => {
                 self.clear_all_pending = false;
                 self.clear_all_error = Some(message.clone());
@@ -394,7 +379,7 @@ impl ClipboardView {
             }
             FailureKind::BatchDelete => {
                 self.batch_pending = false;
-                if self.confirmation == Some(HistoryConfirmation::DeleteSelected) {
+                if self.confirmation == Some(HistoryConfirmation::Selection) {
                     self.close_history_confirmation(window, cx);
                 }
             }

@@ -262,11 +262,7 @@ impl ClipboardView {
                     })
                     .disabled(delete_disabled)
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.open_history_confirmation(
-                            HistoryConfirmation::DeleteSelected,
-                            window,
-                            cx,
-                        );
+                        this.open_history_confirmation(HistoryConfirmation::Selection, window, cx);
                     })),
             );
         let mut strip = Self::mode_chrome_strip(cx)

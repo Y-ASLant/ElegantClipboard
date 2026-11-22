@@ -33,7 +33,6 @@ impl ClipboardView {
         if !self.todo_preference.value.enabled
             || self.todos_open
             || self.group_delete_pending
-            || self.clear_pending
             || self.group_reorder_pending
         {
             return;

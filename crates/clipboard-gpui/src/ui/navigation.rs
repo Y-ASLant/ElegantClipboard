@@ -194,7 +194,7 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.group_delete_pending || self.clear_pending || self.group_reorder_pending {
+        if self.group_delete_pending || self.group_reorder_pending {
             return;
         }
         let selected = match category {

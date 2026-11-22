@@ -100,7 +100,7 @@ impl ClipboardView {
             None
         };
         self.batch_pending = false;
-        if self.confirmation == Some(HistoryConfirmation::DeleteSelected) {
+        if self.confirmation == Some(HistoryConfirmation::Selection) {
             self.close_history_confirmation(window, cx);
         }
         self.reset_selection();

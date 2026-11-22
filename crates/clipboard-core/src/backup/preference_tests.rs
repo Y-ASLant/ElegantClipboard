@@ -29,7 +29,6 @@ fn backup_roundtrips_all_non_default_preferences() -> Result<()> {
         auto_reset_state: true,
         search_auto_focus: true,
         search_auto_clear: false,
-        skip_clear_confirm: true,
         paste_close_window: false,
         paste_key: PasteKeyPreference::ShiftInsert,
         paste_move_to_top: false,
@@ -123,7 +122,6 @@ fn backup_roundtrips_all_non_default_preferences() -> Result<()> {
     preferences.set_auto_reset_state(expected.auto_reset_state)?;
     preferences.set_search_auto_focus(expected.search_auto_focus)?;
     preferences.set_search_auto_clear(expected.search_auto_clear)?;
-    preferences.set_skip_clear_confirm(expected.skip_clear_confirm)?;
     preferences.set_paste_close_window(expected.paste_close_window)?;
     preferences.set_paste_key(expected.paste_key)?;
     preferences.set_paste_move_to_top(expected.paste_move_to_top)?;

@@ -24,12 +24,6 @@ impl ClipboardView {
             self.locate_id = None;
             self.cancel_sequence(cx);
             self.close_hover_preview("search_changed", cx);
-            if matches!(
-                self.confirmation,
-                Some(HistoryConfirmation::ClearHistory(_))
-            ) {
-                self.close_history_confirmation(window, cx);
-            }
             self.reset_selection();
             self.sync_confirmation_dialog(window, cx);
             self.release_history_drag(cx);

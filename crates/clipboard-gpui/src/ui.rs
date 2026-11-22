@@ -270,11 +270,12 @@ enum HistoryMenuAction {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HistoryConfirmation {
-    DeleteGroup(i64),
-    ClearHistory(Option<i64>),
-    DeleteSelected,
+    /// Remove a named group (items move to default).
+    Group(i64),
+    /// Delete the current multi-selection.
+    Selection,
     /// Single history row; id must still be in the loaded list.
-    DeleteOne(i64),
+    Item(i64),
 }
 
 struct ClipboardView {
@@ -330,7 +331,6 @@ struct ClipboardView {
     group_edit_error: Option<String>,
     group_reorder_pending: bool,
     group_delete_pending: bool,
-    clear_pending: bool,
     clear_all_error: Option<String>,
     clear_all_pending: bool,
     batch_mode: bool,
@@ -431,7 +431,6 @@ struct ClipboardView {
     auto_reset_state: PendingPref<bool>,
     search_auto_focus: PendingPref<bool>,
     search_auto_clear: PendingPref<bool>,
-    skip_clear_confirm: PendingPref<bool>,
     paste_close_window: PendingPref<bool>,
     paste_key: PendingPref<PasteKeyPreference>,
     paste_delivery_mode: PendingPref<PasteDeliveryMode>,

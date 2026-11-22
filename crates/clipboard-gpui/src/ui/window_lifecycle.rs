@@ -220,7 +220,6 @@ impl ClipboardView {
             || self.paste_state.merging()
             || self.batch_pending
             || self.group_delete_pending
-            || self.clear_pending
         {
             return;
         }
@@ -403,10 +402,19 @@ impl ClipboardView {
         if !self.prepare_app_exit(cx) {
             return;
         }
-        let _ = clipboard_platform::launch_env::mark_wait_for_instance(&self.service.data_dir);
+        let data_dir = self.service.data_dir.clone();
+        if let Err(error) = clipboard_platform::launch_env::mark_wait_for_instance(&data_dir) {
+            self.set_feedback_message(format!(
+                "{}: {error}",
+                tr(self.language, "重启失败", "Failed to restart")
+            ));
+            self.is_error = true;
+            cx.notify();
+            return;
+        }
         let spawn = std::env::current_exe().and_then(|executable| {
             let mut command = std::process::Command::new(executable);
-            clipboard_platform::launch_env::apply(&mut command, Some(&self.service.data_dir));
+            clipboard_platform::launch_env::apply(&mut command, Some(&data_dir));
             command.spawn()
         });
         match spawn {
@@ -416,6 +424,7 @@ impl ClipboardView {
                 cx.quit();
             }
             Err(error) => {
+                let _ = clipboard_platform::launch_env::take_wait_for_instance(&data_dir);
                 self.set_feedback_message(format!(
                     "{}: {error}",
                     tr(self.language, "重启失败", "Failed to restart")

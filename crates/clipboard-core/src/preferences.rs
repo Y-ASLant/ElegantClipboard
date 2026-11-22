@@ -29,7 +29,6 @@ const PERSIST_WINDOW_SIZE_KEY: &str = "gpui_persist_window_size";
 const AUTO_RESET_STATE_KEY: &str = "gpui_auto_reset_state";
 const SEARCH_AUTO_FOCUS_KEY: &str = "gpui_search_auto_focus";
 const SEARCH_AUTO_CLEAR_KEY: &str = "gpui_search_auto_clear";
-const SKIP_CLEAR_CONFIRM_KEY: &str = "gpui_skip_clear_confirm";
 const PASTE_CLOSE_WINDOW_KEY: &str = "gpui_paste_close_window";
 const PASTE_KEY_KEY: &str = "gpui_paste_key";
 const PASTE_MOVE_TO_TOP_KEY: &str = "gpui_paste_move_to_top";
@@ -237,14 +236,6 @@ impl Preferences {
 
     pub fn set_search_auto_clear(&self, enabled: bool) -> Result<()> {
         self.set_bool_pref(SEARCH_AUTO_CLEAR_KEY, enabled)
-    }
-
-    pub fn skip_clear_confirm(&self) -> Result<bool> {
-        self.bool_pref(SKIP_CLEAR_CONFIRM_KEY, false)
-    }
-
-    pub fn set_skip_clear_confirm(&self, enabled: bool) -> Result<()> {
-        self.set_bool_pref(SKIP_CLEAR_CONFIRM_KEY, enabled)
     }
 
     pub fn paste_close_window(&self) -> Result<bool> {

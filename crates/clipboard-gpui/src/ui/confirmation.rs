@@ -3,11 +3,10 @@ use super::*;
 impl HistoryConfirmation {
     fn matches_scope(self, group_id: Option<i64>, has_selection: bool) -> bool {
         match self {
-            Self::DeleteGroup(id) => group_id == Some(id),
-            Self::ClearHistory(confirmed_group) => group_id == confirmed_group,
-            Self::DeleteSelected => has_selection,
+            Self::Group(id) => group_id == Some(id),
+            Self::Selection => has_selection,
             // Item presence is checked in confirmation_active.
-            Self::DeleteOne(_) => true,
+            Self::Item(_) => true,
         }
     }
 }
@@ -28,47 +27,11 @@ impl ClipboardView {
             return;
         }
         self.history.selected = Some(id);
-        self.open_history_confirmation(HistoryConfirmation::DeleteOne(id), window, cx);
+        self.open_history_confirmation(HistoryConfirmation::Item(id), window, cx);
     }
 }
 
 impl ClipboardView {
-    fn clear_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if (!self.confirmation_active(HistoryConfirmation::ClearHistory(self.history.group_id()))
-            && !self.skip_clear_confirm.value)
-            || self.clear_pending
-        {
-            return;
-        }
-        // The worker clears the whole group, not just visible search results.
-        let affects_editor = self.editor.id.is_some_and(|id| {
-            self.history
-                .items
-                .iter()
-                .find(|item| item.id == id)
-                .is_none_or(|item| {
-                    item.group_id == self.history.group_id() && !item.is_pinned && !item.is_favorite
-                })
-        });
-        if !self.close_history_editor_for_action(affects_editor, window, cx) {
-            return;
-        }
-        if self.send(
-            Command::ClearHistory {
-                group_id: self.history.group_id(),
-                generation: self.history.generation,
-            },
-            cx,
-        ) {
-            self.clear_pending = true;
-            cx.notify();
-        } else if self.confirmation
-            == Some(HistoryConfirmation::ClearHistory(self.history.group_id()))
-        {
-            self.confirmation_error = Some(self.message.clone());
-        }
-    }
-
     pub(super) fn clear_all_history(&mut self, cx: &mut Context<Self>) {
         let owner = cx.weak_entity();
         let main = self.main_window;
@@ -98,19 +61,16 @@ impl ClipboardView {
             return false;
         }
         match kind {
-            HistoryConfirmation::DeleteOne(id) => {
-                self.history.items.iter().any(|item| item.id == id)
-            }
+            HistoryConfirmation::Item(id) => self.history.items.iter().any(|item| item.id == id),
             other => other.matches_scope(self.history.group_id(), !self.selected_ids.is_empty()),
         }
     }
 
     pub(super) fn confirmation_pending(&self, kind: HistoryConfirmation) -> bool {
         match kind {
-            HistoryConfirmation::DeleteGroup(_) => self.group_delete_pending,
-            HistoryConfirmation::ClearHistory(_) => self.clear_pending,
-            HistoryConfirmation::DeleteSelected => self.batch_pending,
-            HistoryConfirmation::DeleteOne(_) => false,
+            HistoryConfirmation::Group(_) => self.group_delete_pending,
+            HistoryConfirmation::Selection => self.batch_pending,
+            HistoryConfirmation::Item(_) => false,
         }
     }
 
@@ -157,9 +117,8 @@ impl ClipboardView {
             return;
         }
         match kind {
-            HistoryConfirmation::DeleteGroup(_) => self.delete_group(cx),
-            HistoryConfirmation::ClearHistory(_) => self.clear_history(window, cx),
-            HistoryConfirmation::DeleteSelected => {
+            HistoryConfirmation::Group(_) => self.delete_group(cx),
+            HistoryConfirmation::Selection => {
                 let affects_editor = self
                     .editor
                     .id
@@ -169,7 +128,7 @@ impl ClipboardView {
                 }
                 self.delete_selected(cx);
             }
-            HistoryConfirmation::DeleteOne(id) => {
+            HistoryConfirmation::Item(id) => {
                 if !self.close_history_editor_for_action(self.editor.id == Some(id), window, cx) {
                     return;
                 }
@@ -220,7 +179,7 @@ impl ClipboardView {
         let pending = view.confirmation_pending(kind);
         let error = view.confirmation_error.clone();
         let (title, prompt, confirm_label) = match kind {
-            HistoryConfirmation::DeleteGroup(id) => {
+            HistoryConfirmation::Group(id) => {
                 let (name, count) = view.groups.iter()
                     .find(|group| group.id == id)
                     .map(|group| (group.name.as_str(), group.item_count))
@@ -233,20 +192,7 @@ impl ClipboardView {
                 (tr(language, "删除分组", "Delete group"), prompt,
                  tr(language, "保留记录并删除分组", "Delete group and keep items").to_owned())
             }
-            HistoryConfirmation::ClearHistory(group_id) => {
-                let name = group_id
-                    .and_then(|id| view.groups.iter().find(|group| group.id == id))
-                    .map(|group| group.name.as_str())
-                    .unwrap_or(tr(language, "默认分组", "Default"));
-                let prompt = if language == LanguagePreference::English {
-                    format!("Clear unpinned, non-favorite items from “{name}”? Search, favorites, and type filters do not change the scope.")
-                } else {
-                    format!("清理「{name}」中未置顶且未收藏的记录？搜索、收藏和类型筛选不影响清理范围。")
-                };
-                (tr(language, "清理历史", "Clear history"), prompt,
-                 tr(language, "确认清理", "Clear").to_owned())
-            }
-            HistoryConfirmation::DeleteSelected => {
+            HistoryConfirmation::Selection => {
                 let count = view.selected_ids.len();
                 let prompt = if language == LanguagePreference::English {
                     format!("Delete the {count} selected items? This includes pinned and favorite items and cannot be undone.")
@@ -260,7 +206,7 @@ impl ClipboardView {
                 };
                 (tr(language, "删除选中", "Delete selected"), prompt, confirm)
             }
-            HistoryConfirmation::DeleteOne(_) => (
+            HistoryConfirmation::Item(_) => (
                 tr(language, "删除记录", "Delete item"),
                 tr(
                     language,
@@ -290,18 +236,6 @@ impl ClipboardView {
                     .gap_3()
                     .pt_1()
                     .child(prompt)
-                    .when(matches!(kind, HistoryConfirmation::ClearHistory(_)), |body| {
-                        body.child(
-                            div()
-                                .text_size(px(visual::TEXT_SMALL))
-                                .text_color(cx.theme().muted_foreground)
-                                .child(tr(
-                                    language,
-                                    "此操作无法撤销；可先导出备份。",
-                                    "This cannot be undone. Export a backup first if needed.",
-                                )),
-                        )
-                    })
                     .when_some(error, |body, error| {
                         body.child(Alert::error("history-confirm-error", error).small())
                     }),
@@ -323,16 +257,13 @@ impl ClipboardView {
                     .danger()
                     .label(if pending {
                         match kind {
-                            HistoryConfirmation::DeleteGroup(_) => tr(
+                            HistoryConfirmation::Group(_) => tr(
                                 language,
                                 "正在删除分组…",
                                 "Deleting group…",
                             ),
-                            HistoryConfirmation::ClearHistory(_) => {
-                                tr(language, "正在清理…", "Clearing…")
-                            }
-                            HistoryConfirmation::DeleteSelected
-                            | HistoryConfirmation::DeleteOne(_) => {
+                            HistoryConfirmation::Selection
+                            | HistoryConfirmation::Item(_) => {
                                 tr(language, "正在删除…", "Deleting…")
                             }
                         }
@@ -355,18 +286,11 @@ mod tests {
 
     #[test]
     fn confirmation_cannot_apply_to_another_group_or_an_empty_selection() {
-        for confirmation in [
-            HistoryConfirmation::DeleteGroup(7),
-            HistoryConfirmation::ClearHistory(Some(7)),
-        ] {
-            assert!(confirmation.matches_scope(Some(7), false));
-            assert!(!confirmation.matches_scope(Some(8), true));
-            assert!(!confirmation.matches_scope(None, true));
-        }
-        let clear_default = HistoryConfirmation::ClearHistory(None);
-        assert!(clear_default.matches_scope(None, false));
-        assert!(!clear_default.matches_scope(Some(7), false));
-        assert!(HistoryConfirmation::DeleteSelected.matches_scope(Some(7), true));
-        assert!(!HistoryConfirmation::DeleteSelected.matches_scope(Some(7), false));
+        let confirmation = HistoryConfirmation::Group(7);
+        assert!(confirmation.matches_scope(Some(7), false));
+        assert!(!confirmation.matches_scope(Some(8), true));
+        assert!(!confirmation.matches_scope(None, true));
+        assert!(HistoryConfirmation::Selection.matches_scope(Some(7), true));
+        assert!(!HistoryConfirmation::Selection.matches_scope(Some(7), false));
     }
 }

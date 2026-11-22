@@ -9,7 +9,6 @@ impl ClipboardView {
     ) {
         if self.group_save_pending
             || self.group_delete_pending
-            || self.clear_pending
             || self.batch_pending
             || self.group_reorder_pending
         {
@@ -94,7 +93,7 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.group_delete_pending || self.clear_pending || self.group_reorder_pending {
+        if self.group_delete_pending || self.group_reorder_pending {
             return;
         }
         let index = self
@@ -375,10 +374,10 @@ impl ClipboardView {
         if self.group_delete_pending {
             return;
         }
-        let Some(HistoryConfirmation::DeleteGroup(id)) = self.confirmation else {
+        let Some(HistoryConfirmation::Group(id)) = self.confirmation else {
             return;
         };
-        if !self.confirmation_active(HistoryConfirmation::DeleteGroup(id)) {
+        if !self.confirmation_active(HistoryConfirmation::Group(id)) {
             return;
         }
         if self.send(

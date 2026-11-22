@@ -156,7 +156,6 @@ fn window_behavior_defaults_and_persists_without_restoring_disabled_size() -> Re
     assert!(!preferences.auto_reset_state()?);
     assert!(!preferences.search_auto_focus()?);
     assert!(preferences.search_auto_clear()?);
-    assert!(!preferences.skip_clear_confirm()?);
     assert!(preferences.paste_close_window()?);
     assert_eq!(preferences.paste_key()?, PasteKeyPreference::CtrlV);
     assert!(preferences.paste_move_to_top()?);
@@ -166,7 +165,6 @@ fn window_behavior_defaults_and_persists_without_restoring_disabled_size() -> Re
     preferences.set_auto_reset_state(true)?;
     preferences.set_search_auto_focus(true)?;
     preferences.set_search_auto_clear(false)?;
-    preferences.set_skip_clear_confirm(true)?;
     preferences.set_paste_close_window(false)?;
     preferences.set_paste_key(PasteKeyPreference::ShiftInsert)?;
     preferences.set_paste_move_to_top(false)?;
@@ -179,7 +177,6 @@ fn window_behavior_defaults_and_persists_without_restoring_disabled_size() -> Re
     assert!(preferences.auto_reset_state()?);
     assert!(preferences.search_auto_focus()?);
     assert!(!preferences.search_auto_clear()?);
-    assert!(preferences.skip_clear_confirm()?);
     assert!(!preferences.paste_close_window()?);
     assert_eq!(preferences.paste_key()?, PasteKeyPreference::ShiftInsert);
     assert!(!preferences.paste_move_to_top()?);
