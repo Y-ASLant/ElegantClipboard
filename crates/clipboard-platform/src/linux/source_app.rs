@@ -48,6 +48,7 @@ fn source(x: &X11, window: u32) -> Option<SourceApp> {
     Some(SourceApp {
         name,
         executable: Some(executable),
+        detail: None,
     })
 }
 
@@ -116,6 +117,7 @@ fn clipboard_owner_source(x: &X11, owner: u32) -> Option<SourceApp> {
         return Some(SourceApp {
             name,
             executable: executable.to_str().map(str::to_owned),
+            detail: None,
         });
     }
     source(x, owner)

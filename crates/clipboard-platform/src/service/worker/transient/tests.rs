@@ -15,6 +15,7 @@ fn entry(sequence: u32, value: &str, now: Instant) -> PendingCapture {
         Some(source_app::SourceApp {
             name: "Test".into(),
             executable: None,
+            detail: None,
         }),
         now,
     )

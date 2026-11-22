@@ -52,8 +52,15 @@ impl Worker {
             let icon = source.executable.as_deref().and_then(|executable| {
                 source_app::extract_and_cache_icon(executable, &self.icons_dir)
             });
-            self.history
-                .set_source_app(id, &source.name, icon.as_deref())?;
+            // The stored name is capped at 128 characters.
+            let label: String = match &source.detail {
+                Some(detail) => format!("{}：{detail}", source.name)
+                    .chars()
+                    .take(128)
+                    .collect(),
+                None => source.name.clone(),
+            };
+            self.history.set_source_app(id, &label, icon.as_deref())?;
         }
         if let Some(id) = id
             && !extra.is_empty()

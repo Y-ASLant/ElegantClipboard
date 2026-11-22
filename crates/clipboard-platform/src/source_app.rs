@@ -69,9 +69,48 @@ pub fn running_apps(icons_dir: &Path) -> Vec<RunningApp> {
 
 pub fn clipboard_source() -> Option<SourceApp> {
     let owner = unsafe { GetClipboardOwner() }.ok();
-    owner
+    let foreground = unsafe { GetForegroundWindow() };
+    let mut source = owner
         .and_then(process_name_for_window)
-        .or_else(|| process_name_for_window(unsafe { GetForegroundWindow() }))
+        .or_else(|| process_name_for_window(foreground))?;
+    // The owner is often a hidden helper window; the document is named in the
+    // foreground title, which only counts when it belongs to the same program.
+    if process_name_for_window(foreground)
+        .is_some_and(|front| front.executable == source.executable)
+    {
+        source.detail = window_title(foreground)
+            .as_deref()
+            .and_then(document_from_title);
+    }
+    Some(source)
+}
+
+fn window_title(window: HWND) -> Option<String> {
+    let mut title = [0u16; 512];
+    let length = unsafe { GetWindowTextW(window, &mut title) };
+    (length > 0).then(|| String::from_utf16_lossy(&title[..length as usize]))
+}
+
+/// Leading part of a "document - application" title; a bare title names no document.
+fn document_from_title(title: &str) -> Option<String> {
+    let end = [" - ", " — ", " – "]
+        .iter()
+        .filter_map(|separator| title.find(separator))
+        .min()?;
+    let document = title[..end].trim().trim_start_matches(['*', '●']).trim();
+    (!document.is_empty()).then(|| document.to_owned())
+}
+
+/// `SourceURL` from the header of a CF_HTML payload, as browsers write it.
+pub(crate) fn source_url_from_html(data: &[u8]) -> Option<String> {
+    let head = String::from_utf8_lossy(&data[..data.len().min(4096)]);
+    head.split('<')
+        .next()?
+        .lines()
+        .find_map(|line| line.strip_prefix("SourceURL:"))
+        .map(str::trim)
+        .filter(|url| url.starts_with("http://") || url.starts_with("https://"))
+        .map(str::to_owned)
 }
 
 /// Short process/app name for a paste target `(hwnd, pid)`, best-effort.
@@ -106,6 +145,7 @@ fn process_name_for_window(window: HWND) -> Option<SourceApp> {
     Some(SourceApp {
         name,
         executable: Some(executable),
+        detail: None,
     })
 }
 
@@ -288,6 +328,34 @@ mod tests {
             Some("Editor".into())
         );
         assert_eq!(display_name_from_path(""), None);
+    }
+
+    #[test]
+    fn window_title_names_a_document_only_before_an_application_suffix() {
+        assert_eq!(
+            document_from_title("*备忘.txt - 记事本"),
+            Some("备忘.txt".into())
+        );
+        assert_eq!(
+            document_from_title("main.rs - project - Editor"),
+            Some("main.rs".into())
+        );
+        assert_eq!(document_from_title("Documents"), None);
+        assert_eq!(document_from_title(" - Editor"), None);
+    }
+
+    #[test]
+    fn html_header_yields_only_a_web_source_url() {
+        let html = b"Version:0.9\r\nStartHTML:0000000105\r\nSourceURL:https://example.com/a?b=1\r\n<html>SourceURL:https://wrong.example</html>";
+        assert_eq!(
+            source_url_from_html(html),
+            Some("https://example.com/a?b=1".into())
+        );
+        assert_eq!(
+            source_url_from_html(b"Version:0.9\r\nSourceURL:about:blank\r\n<html>"),
+            None
+        );
+        assert_eq!(source_url_from_html(b"Version:0.9\r\n<html></html>"), None);
     }
 
     #[test]
