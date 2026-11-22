@@ -33,9 +33,8 @@ const V1_2_10_COLUMNS: &[&str] = &[
 const V2_TABLES: &[&str] = &["native_formats", "captured_formats", "content_hash_aliases"];
 
 impl Database {
-    /// 只给 1.2.10 补 `note`。那一版已有当前列，且没有 2.0 的表。
-    /// 更早的 1.x、其他 2.0 beta，以及已有 `note` 但缺这些列的库，拒绝打开且不改文件。
-    /// 已有 `note` 和这些列的当前库不再做结构升级；缺 2.0 表时由后续 schema 补上。
+    /// 仅升级 1.2.10：已有当前列、尚无 `note`、也无 2.0 表时补 `note`。
+    /// 更早或缺列的库拒绝打开且不改文件。已有 `note` 的当前库跳过；缺 2.0 表由后续 schema 补。
     pub(super) fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         if !table_exists(conn, "clipboard_items")? {
             return Ok(());
@@ -166,16 +165,16 @@ mod tests {
         );
         assert!(!has_table(&older, "native_formats"));
 
-        let beta = directory.path().join("beta.db");
-        let connection = Connection::open(&beta).unwrap();
+        let hybrid = directory.path().join("hybrid.db");
+        let connection = Connection::open(&hybrid).unwrap();
         connection.execute_batch(V1_2_10).unwrap();
         connection
             .execute_batch("CREATE TABLE native_formats (item_id INTEGER, format_name TEXT);")
             .unwrap();
         drop(connection);
-        assert!(Database::new(beta.clone()).is_err());
-        assert!(!columns(&beta).contains(&"note".to_string()));
-        assert!(!has_table(&beta, "captured_formats"));
+        assert!(Database::new(hybrid.clone()).is_err());
+        assert!(!columns(&hybrid).contains(&"note".to_string()));
+        assert!(!has_table(&hybrid, "captured_formats"));
     }
 
     /// 1.2.10 升上来后仍可能留着 content_type CHECK；回填 URL 前要先去掉它。
@@ -259,11 +258,11 @@ mod tests {
         assert_eq!(backfill, "done");
     }
 
-    /// 已有备注但缺 `file_payload` 的 2.0 beta 不是当前库，也不能当作 1.2.10。
+    /// 有 `note` 但缺 1.2.10 列（如 `file_payload`）的库既非当前也非 1.2.10。
     #[test]
-    fn note_without_file_payload_is_rejected_unchanged() {
+    fn incomplete_schema_with_note_is_rejected_unchanged() {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("note_without_payload.db");
+        let path = directory.path().join("incomplete_note.db");
         Connection::open(&path)
             .unwrap()
             .execute_batch(
