@@ -16,11 +16,21 @@ fn settings_snapshot(history: &History) -> Result<Vec<(String, String, Option<St
         .collect::<Result<Vec<_>, _>>()?)
 }
 
+fn integrity(history: &History) -> String {
+    history
+        .db
+        .write_connection()
+        .lock()
+        .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+        .unwrap_or_else(|e| format!("err:{e}"))
+}
+
 #[test]
 fn cleanup_preserves_history_metadata_other_settings_and_image_storage() -> Result<()> {
     let dir = tempfile::tempdir()?;
     let db_path = dir.path().join("clipboard.db");
     let history = History::open(db_path.clone())?;
+    assert_eq!(integrity(&history), "ok", "after open");
     let images = dir.path().join("images");
     let staged = dir.path().join("staged");
     fs::create_dir_all(staged.join("legacy-hash/nested"))?;
@@ -66,6 +76,9 @@ fn cleanup_preserves_history_metadata_other_settings_and_image_storage() -> Resu
          CREATE TRIGGER clipboard_items_update_timestamp AFTER UPDATE ON clipboard_items
          BEGIN UPDATE clipboard_items SET updated_at = datetime('now', 'localtime') WHERE id = new.id; END;",
     )?;
+    assert_eq!(integrity(&history), "ok", "after trigger dance");
+    let early = history.set_note(text, "early note");
+    assert!(early.is_ok(), "early set_note after dance: {early:?}");
     for folder in ["blobs", "image_tmp"] {
         fs::create_dir(dir.path().join(folder))?;
         fs::write(dir.path().join(folder).join("retained"), folder.as_bytes())?;
@@ -76,6 +89,7 @@ fn cleanup_preserves_history_metadata_other_settings_and_image_storage() -> Resu
         .collect::<Result<Vec<_>>>()?;
     let settings_before = settings_snapshot(&history)?;
     history.remove_file_copies(dir.path())?;
+    assert_eq!(integrity(&history), "ok", "after cleanup");
     assert!(!staged.exists());
     assert_eq!(fs::read(&original)?, b"original bytes");
     assert_eq!(settings_snapshot(&history)?, settings_before);
@@ -102,7 +116,15 @@ fn cleanup_preserves_history_metadata_other_settings_and_image_storage() -> Resu
         b"image_tmp"
     );
     assert_eq!(history.groups()?[0].name, "kept group");
-    history.set_note(text, "later edit")?;
+    {
+        let conn = history.db.write_connection();
+        let conn = conn.lock();
+        let r = conn.execute_batch("INSERT INTO clipboard_fts(clipboard_fts) VALUES('rebuild');");
+        assert!(r.is_ok(), "rebuild failed: {r:?}");
+    }
+    assert_eq!(integrity(&history), "ok", "after fts rebuild");
+    let note_result = history.set_note(text, "later edit");
+    assert!(note_result.is_ok(), "set_note failed: {note_result:?}");
     assert_ne!(history.item(text)?.updated_at, "2002-03-04 05:06:07");
     drop(settings);
     drop(history);

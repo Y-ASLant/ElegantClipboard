@@ -125,10 +125,15 @@ impl Database {
         }
 
         // 能走到这里的只有 1.2.10 或当前库：`file_payload` 已在，`note` 也已补上。
+        // DROP 内容表会带走索引/触发器；外置 content 的 FTS 须先拆掉再由 SCHEMA 补回。
         info!("Migrating database: removing content_type CHECK constraint");
         let tx = conn.unchecked_transaction()?;
         tx.execute_batch(
-            "CREATE TABLE clipboard_items_new (
+            "DROP TRIGGER IF EXISTS clipboard_fts_ai;
+             DROP TRIGGER IF EXISTS clipboard_fts_ad;
+             DROP TRIGGER IF EXISTS clipboard_fts_au;
+             DROP TABLE IF EXISTS clipboard_fts;
+             CREATE TABLE clipboard_items_new (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 content_type TEXT NOT NULL,
                 text_content TEXT,
@@ -169,27 +174,13 @@ impl Database {
             DROP TABLE clipboard_items;
             ALTER TABLE clipboard_items_new RENAME TO clipboard_items;",
         )?;
-        tx.execute_batch(
-            "CREATE INDEX IF NOT EXISTS idx_clipboard_created_at ON clipboard_items(created_at DESC);
-             CREATE INDEX IF NOT EXISTS idx_clipboard_pinned ON clipboard_items(is_pinned) WHERE is_pinned = 1;
-             CREATE INDEX IF NOT EXISTS idx_clipboard_favorite ON clipboard_items(is_favorite) WHERE is_favorite = 1;
-             CREATE INDEX IF NOT EXISTS idx_clipboard_type ON clipboard_items(content_type);
-             CREATE INDEX IF NOT EXISTS idx_clipboard_hash_default ON clipboard_items(content_hash) WHERE group_id IS NULL;
-             CREATE INDEX IF NOT EXISTS idx_clipboard_hash_group ON clipboard_items(group_id, content_hash) WHERE group_id IS NOT NULL;
-             CREATE INDEX IF NOT EXISTS idx_clipboard_semantic_hash_default ON clipboard_items(semantic_hash) WHERE group_id IS NULL;
-             CREATE INDEX IF NOT EXISTS idx_clipboard_semantic_hash_group ON clipboard_items(group_id, semantic_hash) WHERE group_id IS NOT NULL;
-             CREATE INDEX IF NOT EXISTS idx_clipboard_access ON clipboard_items(access_count DESC, last_accessed_at DESC);
-             CREATE INDEX IF NOT EXISTS idx_clipboard_favorite_order ON clipboard_items(favorite_order DESC) WHERE is_favorite = 1;
-             CREATE INDEX IF NOT EXISTS idx_clipboard_sort_order ON clipboard_items(sort_order DESC);
-             CREATE INDEX IF NOT EXISTS idx_clipboard_group ON clipboard_items(group_id);
-             CREATE TRIGGER IF NOT EXISTS clipboard_items_update_timestamp
-             AFTER UPDATE ON clipboard_items
-             BEGIN
-                 UPDATE clipboard_items SET updated_at = datetime('now', 'localtime')
-                 WHERE id = new.id;
-             END;",
-        )?;
         tx.commit()?;
+        // 补回挂在 clipboard_items 上的索引、触发器与 FTS。
+        conn.execute_batch(super::SCHEMA_SQL)?;
+        conn.execute(
+            "DELETE FROM settings WHERE key = '_migration_clipboard_fts'",
+            [],
+        )?;
         Ok(())
     }
 

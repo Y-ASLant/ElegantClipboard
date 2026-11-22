@@ -154,7 +154,9 @@ CREATE TRIGGER IF NOT EXISTS clipboard_fts_ad AFTER DELETE ON clipboard_items BE
     INSERT INTO clipboard_fts(clipboard_fts, rowid, text_content, file_paths, note)
     VALUES ('delete', old.id, old.text_content, old.file_paths, old.note);
 END;
-CREATE TRIGGER IF NOT EXISTS clipboard_fts_au AFTER UPDATE ON clipboard_items BEGIN
+CREATE TRIGGER IF NOT EXISTS clipboard_fts_au
+AFTER UPDATE OF text_content, file_paths, note ON clipboard_items
+BEGIN
     INSERT INTO clipboard_fts(clipboard_fts, rowid, text_content, file_paths, note)
     VALUES ('delete', old.id, old.text_content, old.file_paths, old.note);
     INSERT INTO clipboard_fts(rowid, text_content, file_paths, note)

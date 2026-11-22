@@ -98,7 +98,25 @@ impl Database {
         Self::backfill_categories(conn)?;
         Self::backfill_semantic_hashes(conn)?;
         Self::normalize_favorite_order(conn)?;
+        // 旧库可能仍是「任意列 UPDATE 都改 FTS」；与 timestamp 触发器叠在一起会 SQLITE_CORRUPT_INDEX。
+        Self::ensure_fts_update_trigger(conn)?;
         Self::rebuild_search_index_once(conn)?;
+        Ok(())
+    }
+
+    /// FTS 只跟踪正文/路径/备注；`CREATE TRIGGER IF NOT EXISTS` 不会替换旧定义。
+    fn ensure_fts_update_trigger(conn: &Connection) -> Result<(), rusqlite::Error> {
+        conn.execute_batch(
+            "DROP TRIGGER IF EXISTS clipboard_fts_au;
+             CREATE TRIGGER clipboard_fts_au
+             AFTER UPDATE OF text_content, file_paths, note ON clipboard_items
+             BEGIN
+                 INSERT INTO clipboard_fts(clipboard_fts, rowid, text_content, file_paths, note)
+                 VALUES ('delete', old.id, old.text_content, old.file_paths, old.note);
+                 INSERT INTO clipboard_fts(rowid, text_content, file_paths, note)
+                 VALUES (new.id, new.text_content, new.file_paths, new.note);
+             END;",
+        )?;
         Ok(())
     }
 
