@@ -76,7 +76,14 @@ pub fn clipboard_source() -> Option<SourceApp> {
         .or_else(|| foreground_source.clone())?;
     // Owner is often a hidden helper; the document name is on the foreground
     // title, and only counts when that window is the same program.
-    if foreground_source.is_some_and(|front| front.executable == source.executable) {
+    // Browsers: tab titles (and multi-tab summaries) are not documents; page URL
+    // comes from CF_HTML SourceURL in read_clipboard when available.
+    if foreground_source.is_some_and(|front| front.executable == source.executable)
+        && !source
+            .executable
+            .as_deref()
+            .is_some_and(is_browser_executable)
+    {
         source.detail = window_title(foreground)
             .as_deref()
             .and_then(document_from_title);
@@ -97,7 +104,38 @@ fn document_from_title(title: &str) -> Option<String> {
         .filter_map(|separator| title.find(separator))
         .min()?;
     let document = title[..end].trim().trim_start_matches(['*', '●']).trim();
-    (!document.is_empty()).then(|| document.to_owned())
+    if document.is_empty() || is_browser_tab_summary(document) {
+        return None;
+    }
+    Some(document.to_owned())
+}
+
+fn is_browser_executable(path: &str) -> bool {
+    let Some(stem) = Path::new(path).file_stem().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    matches!(
+        stem.to_ascii_lowercase().as_str(),
+        "chrome"
+            | "msedge"
+            | "msedgewebview2"
+            | "firefox"
+            | "brave"
+            | "opera"
+            | "vivaldi"
+            | "chromium"
+            | "iexplore"
+            | "waterfox"
+            | "librewolf"
+            | "arc"
+    )
+}
+
+/// Edge/Chrome multi-tab window titles, e.g. `page 和另外 8 个页面` / `page and 8 more pages`.
+fn is_browser_tab_summary(document: &str) -> bool {
+    let lower = document.to_ascii_lowercase();
+    document.contains("和另外") && document.contains("个页面")
+        || lower.contains(" and ") && lower.contains(" more page")
 }
 
 /// Short process/app name for a paste target `(hwnd, pid)`, best-effort.
@@ -329,6 +367,25 @@ mod tests {
         );
         assert_eq!(document_from_title("Documents"), None);
         assert_eq!(document_from_title(" - Editor"), None);
+    }
+
+    #[test]
+    fn browser_multi_tab_titles_are_not_documents() {
+        assert_eq!(
+            document_from_title("huanclee/cargo 和另外 8 个页面 - 个人 - Microsoft Edge"),
+            None
+        );
+        assert_eq!(
+            document_from_title("Docs and 3 more pages - Google Chrome"),
+            None
+        );
+    }
+
+    #[test]
+    fn known_browser_executables_skip_window_title_documents() {
+        assert!(is_browser_executable(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"));
+        assert!(is_browser_executable(r"C:\Program Files\Google\Chrome\Application\chrome.exe"));
+        assert!(!is_browser_executable(r"C:\Windows\System32\notepad.exe"));
     }
 
     #[test]
