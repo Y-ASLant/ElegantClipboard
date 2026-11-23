@@ -1,6 +1,5 @@
 use super::settings_common::{
-    settings_column_field, settings_columns, settings_description, settings_inline,
-    settings_number_field, settings_stack,
+    settings_column_field, settings_columns, settings_inline, settings_number_field, settings_stack,
 };
 use super::*;
 use clipboard_core::{DeletionOutcome, retention::RetentionPolicy};
@@ -65,7 +64,6 @@ impl SettingsWindowView {
             return div().into_any_element();
         };
         let saved = owner.read(cx).retention;
-        let explicitly_saved = owner.read(cx).retention_saved;
         let language = self.language;
         settings_stack()
             .child(
@@ -87,18 +85,6 @@ impl SettingsWindowView {
                         ),
                     ),
             )
-            .child(settings_description(
-                if !explicitly_saved {
-                    tr(language,
-                        "尚未应用到全部分组：默认不限条数、不按天清理。首次保存需要确认。",
-                        "Not applied to all groups yet: default is unlimited count and no age limit. The first save requires confirmation.").to_owned()
-                } else if language == LanguagePreference::English {
-                    format!("Saved: {} days, {} items per group", saved.value.days, saved.value.max_count)
-                } else {
-                    format!("当前生效：{} 天，每组 {} 条", saved.value.days, saved.value.max_count)
-                },
-                cx,
-            ))
             .when_some(self.retention_error.clone(), |body, error| {
                 body.child(Alert::error("retention-invalid", error).small())
             })
@@ -156,10 +142,30 @@ impl SettingsWindowView {
                     tr(language, "保存保留策略？", "Save retention policy?"),
                     cx,
                 ))
-                .child(dialog_copy().child(if language == LanguagePreference::English {
-                    format!("Apply {} days and {} items per group to all groups, including existing custom groups (0 disables the limit)? Existing unpinned, non-favorite history beyond either limit will be deleted immediately. This cannot be undone; export a backup first if needed.", policy.days, policy.max_count)
-                } else {
-                    format!("向全部分组（包括现有自定义分组）应用 {} 天、每组 {} 条（0 表示关闭）？超出任一限制的现有未置顶且未收藏记录将立即删除，无法撤销；如有需要请先导出备份。", policy.days, policy.max_count)
+                .child(dialog_copy().child({
+                    let days = if policy.days == 0 {
+                        tr(language, "不限天数", "no age limit").to_owned()
+                    } else if language == LanguagePreference::English {
+                        format!("{} days", policy.days)
+                    } else {
+                        format!("{} 天", policy.days)
+                    };
+                    let count = if policy.max_count == 0 {
+                        tr(language, "不限条数", "no item limit").to_owned()
+                    } else if language == LanguagePreference::English {
+                        format!("{} items per group", policy.max_count)
+                    } else {
+                        format!("每组 {} 条", policy.max_count)
+                    };
+                    if language == LanguagePreference::English {
+                        format!(
+                            "Apply {days} and {count} to every group, including existing custom groups? Unpinned, non-favorite items beyond either limit are deleted immediately and cannot be recovered. Export a backup first if needed."
+                        )
+                    } else {
+                        format!(
+                            "将「{days}、{count}」应用到全部分组（含现有自定义分组）？超出限制的未置顶、未收藏记录会立即删除且无法恢复。需要时请先导出备份。"
+                        )
+                    }
                 }))
                 .footer(dialog_footer(cx)
                     .child(Button::new("retention-cancel").outline()

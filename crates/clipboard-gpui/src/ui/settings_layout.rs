@@ -149,8 +149,8 @@ const SECTIONS: &[Section] = &[
         page: SettingsPage::Data,
         chinese: "采集格式",
         english: "Capture formats",
-        description_chinese: "关闭后只读取名单中的格式",
-        description_english: "Read only listed formats when off",
+        description_chinese: "",
+        description_english: "",
         content: SettingsWindowView::settings_capture_formats_content,
     },
     Section {

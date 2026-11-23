@@ -118,8 +118,8 @@ impl ClipboardView {
         );
         let detail = tr(
             language,
-            "写入「本地数据」中的当前保存位置。旧版 ZIP 不含设置；GPUI 备份含设置。",
-            "Writes into the current save location under Local data. Legacy ZIP skips settings; GPUI backup includes them.",
+            "如需改路径，先到「本地数据」。",
+            "To change the path, go to Local data first.",
         );
         open_settings_danger_dialog(
             window,
