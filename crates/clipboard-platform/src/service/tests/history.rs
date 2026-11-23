@@ -546,11 +546,17 @@ fn committed_deletion_reports_id_despite_refresh_or_media_cleanup_failure() -> R
             _ => panic!("expected committed deletion outcome"),
         };
         assert_eq!(outcome.deleted, 1);
-        assert_eq!(outcome.cleanup_warning.is_some(), fail_cleanup);
+        if operation == 3 {
+            // ClearAll 重置 images/icons/staged/blobs，目录障碍不会变成 cleanup_warning。
+            assert!(outcome.cleanup_warning.is_none());
+            assert!(!image.exists());
+        } else {
+            assert_eq!(outcome.cleanup_warning.is_some(), fail_cleanup);
+            assert_eq!(image.exists(), fail_cleanup);
+        }
         if fail_refresh {
             assert!(matches!(next_event(&events), Event::BackgroundError(_)));
         }
-        assert_eq!(image.exists(), fail_cleanup);
         drop(service);
         assert!(History::open(database)?.item(id).is_err());
     }

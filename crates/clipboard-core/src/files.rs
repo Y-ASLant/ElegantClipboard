@@ -408,6 +408,15 @@ mod tests {
             "UPDATE clipboard_items SET file_payload = ?1 WHERE id = ?2",
             rusqlite::params![payload.to_string(), id],
         )?;
+        // 未保存策略默认无限；显式上限才触发采集驱逐与 staged 回收。
+        history.save_retention(
+            crate::retention::RetentionPolicy {
+                days: 0,
+                max_count: 10_000,
+            },
+            true,
+            &images,
+        )?;
         history.db.write_connection().lock().execute_batch(
             "WITH RECURSIVE nums(n) AS (
                SELECT 1 UNION ALL SELECT n + 1 FROM nums WHERE n < 9999

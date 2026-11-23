@@ -164,7 +164,6 @@ fn clear_all_removes_protected_records_and_media_but_keeps_groups_and_settings()
     Ok(())
 }
 
-
 #[test]
 fn clear_all_vacuums_database_file() -> Result<()> {
     let directory = tempfile::tempdir()?;
@@ -321,11 +320,21 @@ fn committed_deletions_report_cleanup_failures_and_continue_other_media() -> Res
             _ => history.clear_all_with_media(&images)?,
         };
         assert_eq!(outcome.deleted, 1);
-        assert!(outcome.cleanup_warning.is_some());
         assert!(history.item(id).is_err());
-        assert!(image.is_dir());
-        assert!(blocked.is_dir());
-        assert!(!removable.exists());
+        if operation == 3 {
+            // clear_all 整目录重置，不走单文件回收告警。
+            assert!(outcome.cleanup_warning.is_none());
+            assert!(!image.exists());
+            assert!(!blocked.exists());
+            assert!(!removable.exists());
+            assert!(images.is_dir());
+            assert!(staged.is_dir());
+        } else {
+            assert!(outcome.cleanup_warning.is_some());
+            assert!(image.is_dir());
+            assert!(blocked.is_dir());
+            assert!(!removable.exists());
+        }
     }
     Ok(())
 }
@@ -447,6 +456,15 @@ fn text_eviction_removes_the_oldest_managed_image() -> Result<()> {
     let images = directory.path().join("images");
     let image = history.capture_image(PNG, 3, 2, &images)?;
     let path = PathBuf::from(history.item(image)?.image_path.unwrap());
+    // 未保存策略默认无限；本测验证条数上限触发的媒体回收。
+    history.save_retention(
+        crate::retention::RetentionPolicy {
+            days: 0,
+            max_count: 10_000,
+        },
+        true,
+        &images,
+    )?;
     let connection = db.write_connection();
     connection.lock().execute_batch(
         "WITH RECURSIVE nums(n) AS (

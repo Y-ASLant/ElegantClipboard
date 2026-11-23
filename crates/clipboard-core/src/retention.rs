@@ -31,28 +31,28 @@ impl RetentionPolicy {
 }
 
 impl History {
-    /// Bulk import/restore: if retention was never saved, persist the unlimited default.
-    ///
-    /// Marks the policy as explicitly saved so UI and maintenance use the same unlimited
-    /// limits the unsaved default already implies.
+    /// 导入/恢复后：若从未写过保留策略，落盘 unlimited，与 Default 一致。
     pub fn preserve_imported_history_limits(&self) -> Result<()> {
         let connection = self.db.write_connection();
         let connection = connection.lock();
-        let existing: Option<String> = connection
+        let exists: bool = connection
             .query_row(
-                "SELECT value FROM settings WHERE key = ?1",
+                "SELECT 1 FROM settings WHERE key = ?1",
                 [RETENTION_KEY],
-                |row| row.get(0),
+                |_| Ok(()),
             )
-            .optional()?;
-        if existing.is_some() {
+            .optional()?
+            .is_some();
+        if exists {
             return Ok(());
         }
-        let policy = RetentionPolicy::unlimited();
         connection.execute(
             "INSERT INTO settings (key, value, updated_at)
              VALUES (?1, ?2, datetime('now', 'localtime'))",
-            params![RETENTION_KEY, serde_json::to_string(&policy)?],
+            params![
+                RETENTION_KEY,
+                serde_json::to_string(&RetentionPolicy::unlimited())?
+            ],
         )?;
         Ok(())
     }
@@ -96,7 +96,7 @@ impl History {
                 |row| row.get(0),
             )
             .optional()?;
-        // Before the first explicit save, preserve the original capture-only default-group limit.
+        // 未保存策略时：维护/应用不裁剪；采集也走 Default（无限）。legacy_scope 仍限制「仅默认分组」。
         let legacy_scope = stored.is_none() && change.is_none();
         if legacy_scope && !capture {
             return Ok(DeletionOutcome {

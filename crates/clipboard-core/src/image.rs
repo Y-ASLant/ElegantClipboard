@@ -205,49 +205,35 @@ impl History {
         let deleted = tx.execute("DELETE FROM clipboard_items", [])? as i64;
         tx.commit()?;
         drop(connection);
-        // 全量清空后按引用回收不够：历史裁剪/导入失败会留下孤儿文件。
-        // 直接重置受管媒体目录（images/icons/staged/blobs）。
-        let mut warnings = Vec::new();
-        if let Some(warning) = self.wipe_managed_media_dirs(images_dir) {
-            warnings.push(warning);
-        }
-        // DELETE 不缩文件；VACUUM 才能把 clipboard.db 体积收回。
-        if let Err(error) = self.optimize_storage() {
-            warnings.push(format!("{error:#}"));
+        // 引用回收留不下孤儿；DELETE 也不缩文件 → 整目录重置 + VACUUM。
+        let vacuum_warning = self.optimize_storage().err().map(|error| {
             tracing::warn!(error = %error, "Vacuum after clear all failed");
-        }
+            format!("{error:#}")
+        });
         Ok(DeletionOutcome {
             deleted,
-            cleanup_warning: if warnings.is_empty() {
-                None
-            } else {
-                Some(warnings.join("; "))
-            },
+            cleanup_warning: join_media_warnings([
+                self.wipe_managed_media_dirs(images_dir),
+                vacuum_warning,
+            ]),
         })
     }
 
     fn wipe_managed_media_dirs(&self, images_dir: &Path) -> Option<String> {
         let data_dir = images_dir.parent().unwrap_or(images_dir);
-        let blob_root = self.blob_root().ok();
-        let mut targets = vec![
-            images_dir.to_path_buf(),
-            data_dir.join("icons"),
-            data_dir.join("staged"),
-        ];
-        if let Some(blobs) = blob_root {
-            targets.push(blobs);
-        }
-        let errors: Vec<String> = targets
-            .into_iter()
-            .filter_map(|path| reset_media_directory(&path).err().map(|e| format!("{e:#}")))
-            .collect();
-        if errors.is_empty() {
-            None
-        } else {
-            let warning = errors.join("; ");
+        let errors: Vec<String> = [
+            Some(images_dir.to_path_buf()),
+            Some(data_dir.join("icons")),
+            Some(data_dir.join("staged")),
+            self.blob_root().ok(),
+        ]
+        .into_iter()
+        .flatten()
+        .filter_map(|path| reset_media_directory(&path).err().map(|e| format!("{e:#}")))
+        .collect();
+        join_media_warnings(errors.into_iter().map(Some)).inspect(|warning| {
             tracing::warn!(%warning, "Managed media wipe incomplete after clear all");
-            Some(warning)
-        }
+        })
     }
 
     pub(crate) fn cleanup_media(
@@ -257,21 +243,16 @@ impl History {
         blobs: Vec<String>,
         images_dir: &Path,
     ) -> Option<String> {
-        let errors: Vec<String> = [
+        let errors = [
             self.cleanup_images(images, images_dir),
             self.cleanup_staged(payloads, images_dir),
             self.cleanup_blobs(blobs),
         ]
         .into_iter()
-        .filter_map(|result| result.err().map(|error| format!("{error:#}")))
-        .collect();
-        if errors.is_empty() {
-            None
-        } else {
-            let warning = errors.join("; ");
+        .filter_map(|result| result.err().map(|error| format!("{error:#}")));
+        join_media_warnings(errors.map(Some)).inspect(|warning| {
             tracing::warn!(%warning, "Media cleanup incomplete after database change");
-            Some(warning)
-        }
+        })
     }
 
     /// 删除提交后回收无引用的 blob 文件：重查全库引用集，仅删本存储内未引用项。
@@ -344,16 +325,21 @@ pub(crate) fn remove_media_file(path: &Path) -> Result<()> {
 
 /// 清空并重建受管媒体目录；目录不存在则创建空目录。
 fn reset_media_directory(path: &Path) -> Result<()> {
-    match std::fs::remove_dir_all(path) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => {
-            return Err(error).with_context(|| format!("无法清空媒体目录 {}", path.display()));
-        }
+    if let Err(error) = std::fs::remove_dir_all(path)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        return Err(error).with_context(|| format!("无法清空媒体目录 {}", path.display()));
     }
-    std::fs::create_dir_all(path)
-        .with_context(|| format!("无法重建媒体目录 {}", path.display()))?;
-    Ok(())
+    std::fs::create_dir_all(path).with_context(|| format!("无法重建媒体目录 {}", path.display()))
+}
+
+fn join_media_warnings(parts: impl IntoIterator<Item = Option<String>>) -> Option<String> {
+    let warning = parts.into_iter().flatten().collect::<Vec<_>>().join("; ");
+    if warning.is_empty() {
+        None
+    } else {
+        Some(warning)
+    }
 }
 
 pub struct SavedImage {

@@ -4,10 +4,7 @@ use super::*;
 use gpui_kit::component::progress::Progress;
 use std::{
     path::Path,
-    sync::{
-        Arc, Mutex,
-        mpsc::{self, TryRecvError},
-    },
+    sync::{Arc, Mutex},
     thread,
     time::Duration,
 };
@@ -46,10 +43,10 @@ impl StartupImportView {
         self.done = true;
         self.percent = 100.0;
         self.title = "导入完成".into();
-        self.detail = summary
-            .filter(|text| !text.is_empty())
-            .map(|text| format!("{text}，即将启动主界面").into())
-            .unwrap_or_else(|| "即将启动主界面".into());
+        self.detail = match summary.filter(|text| !text.is_empty()) {
+            Some(text) => format!("{text}，即将启动主界面").into(),
+            None => "即将启动主界面".into(),
+        };
         self.error = None;
     }
 
@@ -66,7 +63,6 @@ impl Render for StartupImportView {
         let running = !self.done && self.error.is_none();
         let percent_label: SharedString = format!("{:.0}%", self.percent).into();
         let ui_size = cx.theme().font_size;
-        let title_size = ui_size + px(4.);
         div()
             .size_full()
             .flex()
@@ -78,11 +74,7 @@ impl Render for StartupImportView {
             .text_color(cx.theme().foreground)
             .font_family(cx.theme().font_family.clone())
             .text_size(ui_size)
-            .child(
-                div()
-                    .text_size(title_size)
-                    .child(self.title.clone()),
-            )
+            .child(div().text_size(ui_size + px(4.)).child(self.title.clone()))
             .child(
                 div()
                     .w(px(360.))
@@ -117,10 +109,6 @@ impl Render for StartupImportView {
                 )
             })
     }
-}
-
-fn load_startup_fonts(data_dir: &Path) -> clipboard_core::preferences::FontPreference {
-    clipboard_core::preferences::peek_fonts(&data_dir.join("clipboard.db"))
 }
 
 fn kind_label_for(data_dir: &Path) -> &'static str {
@@ -163,7 +151,6 @@ pub fn run(data_dir: &Path) -> anyhow::Result<Option<String>> {
         outcome: None,
     }));
     let worker_shared = Arc::clone(&shared);
-    let (tx, rx) = mpsc::channel::<()>();
     thread::spawn(move || {
         let mut last_bucket = -1i32;
         let result = clipboard_platform::apply_pending_import_with_progress(
@@ -181,19 +168,14 @@ pub fn run(data_dir: &Path) -> anyhow::Result<Option<String>> {
                     });
                 });
             },
-        )
-        .map_err(|error| format!("{error:#}"));
+        );
         with_shared(&worker_shared, |state| {
-            state.outcome = Some(match result {
-                Ok(message) => Ok(message),
-                Err(error) => Err(anyhow::anyhow!(error)),
-            });
+            state.outcome = Some(result.map_err(|error| anyhow::anyhow!("{error:#}")));
             state.live = None;
         });
-        let _ = tx.send(());
     });
 
-    let fonts = load_startup_fonts(data_dir);
+    let fonts = clipboard_core::preferences::peek_fonts(&data_dir.join("clipboard.db"));
     let outcome_read = Arc::clone(&shared);
     gpui_kit::application().run(move |cx| {
         gpui_kit::init(cx);
@@ -243,7 +225,7 @@ pub fn run(data_dir: &Path) -> anyhow::Result<Option<String>> {
                             });
                         }
                         if let Some(outcome) = outcome {
-                            let hold_ms = match outcome {
+                            let hold_ms = match &outcome {
                                 Ok(message) => {
                                     poll.update(cx, |this, cx| {
                                         this.succeed(message.as_deref());
@@ -253,7 +235,7 @@ pub fn run(data_dir: &Path) -> anyhow::Result<Option<String>> {
                                 }
                                 Err(error) => {
                                     poll.update(cx, |this, cx| {
-                                        this.fail(error);
+                                        this.fail(error.clone());
                                         cx.notify();
                                     });
                                     5_000
@@ -264,10 +246,6 @@ pub fn run(data_dir: &Path) -> anyhow::Result<Option<String>> {
                                 .await;
                             cx.update(|cx| cx.quit());
                             return;
-                        }
-                        match rx.try_recv() {
-                            Ok(()) | Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => {
-                            }
                         }
                         cx.background_executor()
                             .timer(Duration::from_millis(80))

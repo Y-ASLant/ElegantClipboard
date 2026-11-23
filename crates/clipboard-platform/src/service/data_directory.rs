@@ -164,7 +164,7 @@ fn remove_managed_with_retry(data_dir: &Path, progress: &mut dyn FnMut(f32, &str
         if !path.exists() {
             continue;
         }
-        let mut last_error = None;
+        let mut last_error = None::<std::io::Error>;
         for attempt in 0..40 {
             let result = if path.is_dir() {
                 fs::remove_dir_all(&path)
@@ -176,17 +176,17 @@ fn remove_managed_with_retry(data_dir: &Path, progress: &mut dyn FnMut(f32, &str
                     last_error = None;
                     break;
                 }
-                Err(error) if path.exists() => {
+                Err(_) if !path.exists() => {
+                    // 竞态下目标已消失
+                    last_error = None;
+                    break;
+                }
+                Err(error) => {
                     last_error = Some(error);
-                    if attempt == 0 || attempt % 5 == 0 {
+                    if attempt % 5 == 0 {
                         progress(3.0, "数据文件仍被占用，正在重试");
                     }
                     thread::sleep(Duration::from_millis(150));
-                }
-                Err(_) => {
-                    // 竞态下文件已消失
-                    last_error = None;
-                    break;
                 }
             }
         }
@@ -375,44 +375,43 @@ pub fn apply_pending_import_with_progress(
     let job: PendingImport =
         serde_json::from_slice(&fs::read(&job_path).context("无法读取导入任务")?)
             .context("导入任务损坏")?;
-    progress(1.0, "等待其他实例释放数据目录");
-    // 旧进程或其它程序占着 clipboard.db 时删除会 os error 32；先等 instance.lock。
-    if let Err(error) = wait_until_instance_released(data_dir) {
-        // 等锁失败仍清掉任务，避免每次启动都弹失败窗死循环。
+    // 无论成败都清任务，避免启动反复弹失败窗。
+    let clear_job = || {
         let _ = fs::remove_file(&job_path);
+    };
+
+    progress(1.0, "等待其他实例释放数据目录");
+    // 旧进程占着 clipboard.db 时删除会 os error 32。
+    if let Err(error) = wait_until_instance_released(data_dir) {
+        clear_job();
         return Err(error);
     }
     progress(3.0, "清理当前数据");
     if let Err(error) = remove_managed_with_retry(data_dir, progress) {
-        let _ = fs::remove_file(&job_path);
+        clear_job();
         return Err(error);
     }
-    let result = (|| -> Result<Option<String>> {
-        match job.kind.as_str() {
-            "legacy" => {
-                let report = clipboard_core::legacy_backup::import_legacy_backup_with_progress(
-                    &job.source,
-                    data_dir,
-                    progress,
-                )?;
-                Ok(Some(format!(
-                    "已导入旧版数据 {} 条",
-                    report.items.total_items
-                )))
-            }
-            "gpui" => {
-                let report = clipboard_core::backup::restore_backup_with_progress(
-                    &job.source,
-                    data_dir,
-                    progress,
-                )?;
-                Ok(Some(format!("已恢复备份 {} 条", report.total_items)))
-            }
-            other => bail!("未知导入类型：{other}"),
+
+    let result = match job.kind.as_str() {
+        "legacy" => {
+            let report = clipboard_core::legacy_backup::import_legacy_backup_with_progress(
+                &job.source,
+                data_dir,
+                progress,
+            );
+            report.map(|report| Some(format!("已导入旧版数据 {} 条", report.items.total_items)))
         }
-    })();
-    // 已开始清理后无论成败都清任务，避免启动反复弹窗。
-    let _ = fs::remove_file(&job_path);
+        "gpui" => {
+            let report = clipboard_core::backup::restore_backup_with_progress(
+                &job.source,
+                data_dir,
+                progress,
+            );
+            report.map(|report| Some(format!("已恢复备份 {} 条", report.total_items)))
+        }
+        other => Err(anyhow::anyhow!("未知导入类型：{other}")),
+    };
+    clear_job();
     result
 }
 
