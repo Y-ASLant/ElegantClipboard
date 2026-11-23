@@ -1,4 +1,4 @@
-use gpui_kit::Window;
+use gpui_kit::{Bounds, Pixels, Window};
 use objc2::{class, msg_send, runtime::AnyObject};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
@@ -58,6 +58,9 @@ pub fn is_window_minimized(window: &Window) -> bool {
 pub fn activate_for_input(window: &Window) {
     window.activate_window();
 }
+
+/// No-op on macOS: the non-activating panel takes key focus natively on click.
+pub fn set_click_activate_bounds(_window: &Window, _bounds: Option<Bounds<Pixels>>) {}
 
 const NORMAL_WINDOW_LEVEL: isize = 0;
 const FLOATING_WINDOW_LEVEL: isize = 3;
