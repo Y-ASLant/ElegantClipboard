@@ -200,7 +200,7 @@ impl Render for OnboardingShortcut {
         let unavailable = crate::capabilities::global_shortcut_unavailable_reason(language);
         let locked = owner.onboarding_saving() || unavailable.is_some();
         let status = if pending {
-            tr(language, "正在保存快捷键…", "Saving shortcut…")
+            tr(language, "正在保存快捷键", "Saving shortcut")
         } else if disabled {
             tr(language, "快捷键已关闭", "Shortcut is disabled")
         } else if registered {
@@ -366,7 +366,7 @@ impl Render for OnboardingShortcut {
                             .primary()
                             .h(px(visual::CONTROL_HEIGHT_LARGE))
                             .label(if pending {
-                                tr(language, "保存中…", "Saving…")
+                                tr(language, "保存中", "Saving")
                             } else {
                                 tr(language, "保存更改", "Save changes")
                             })

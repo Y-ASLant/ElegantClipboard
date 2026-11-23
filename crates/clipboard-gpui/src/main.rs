@@ -23,11 +23,27 @@ mod window_effect;
 
 fn main() -> anyhow::Result<()> {
     let mut options = options::Options::from_env()?;
-    let data_dir = clipboard_platform::resolve_data_directory(options.data_dir.as_deref())?;
-    options.wait_for_instance = clipboard_platform::launch_env::take_wait_for_instance(&data_dir);
-    // Keep Options.data_dir as the resolved path so Service and UI share one root.
+    // 启动前只做目录迁移；导入在可见进度窗中执行。
+    let data_dir = clipboard_platform::apply_startup_jobs(options.data_dir.as_deref())?;
+    let mut wait_for_instance = clipboard_platform::launch_env::take_wait_for_instance(&data_dir);
+    if let Ok(root) = clipboard_platform::control_root() {
+        wait_for_instance =
+            clipboard_platform::launch_env::take_wait_for_instance(&root) || wait_for_instance;
+    }
+    options.wait_for_instance = wait_for_instance;
     options.data_dir = Some(data_dir.clone());
     let diagnostics = diagnostics::initialize(&data_dir);
+    if clipboard_platform::has_pending_import(&data_dir) {
+        match ui::startup_import::run(&data_dir) {
+            Ok(Some(message)) => tracing::info!(%message, "startup import finished"),
+            Ok(None) => {}
+            Err(error) => {
+                tracing::error!(error = %format_args!("{error:#}"), "startup import failed");
+                return Err(error);
+            }
+        }
+    }
+
     tracing::info!(
         version = env!("CARGO_PKG_VERSION"),
         os = std::env::consts::OS,

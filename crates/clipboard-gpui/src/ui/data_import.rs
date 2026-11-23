@@ -1,10 +1,17 @@
 use super::*;
-use anyhow::{Context as _, bail};
+use std::time::Duration;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ImportSource {
     LegacyBackup,
     Backup,
+}
+
+/// 导入流程阶段：路径选择 vs 实际解压/升级/安装。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ImportPhase {
+    ChoosingPaths(ImportSource),
+    Importing(ImportSource),
 }
 
 pub(super) struct ImportOutcome {
@@ -14,6 +21,8 @@ pub(super) struct ImportOutcome {
     missing: usize,
     blobs: usize,
     missing_blobs: usize,
+    /// 旧版 ZIP 只导入历史；GPUI 备份完整恢复含设置。
+    settings_restored: bool,
 }
 
 impl ImportOutcome {
@@ -57,18 +66,102 @@ impl ImportOutcome {
                 format!("；已恢复 {blobs} 个原生格式附件，缺失 {missing_blobs} 个")
             });
         }
+        description.push_str(if self.settings_restored {
+            tr(
+                language,
+                "；设置已一并恢复。",
+                "; settings restored with the backup.",
+            )
+        } else {
+            tr(
+                language,
+                "；未导入任何设置，打开后使用默认设置。",
+                "; no settings imported — defaults apply when opened.",
+            )
+        });
         description
     }
 }
 
 impl ClipboardView {
-    pub(super) fn start_data_import(&mut self, source: ImportSource, cx: &mut Context<Self>) {
-        if self.data_import_pending {
+    /// 仅选 ZIP：导入/恢复到**当前数据保存位置**，确认后排队并重启应用。
+    /// 必须在按钮 on_click 里直接调用（不要包一层 entity.update），避免 dialog 二次 update 闪退。
+    pub(super) fn start_data_import(
+        owner: WeakEntity<Self>,
+        source: ImportSource,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let Some(view) = owner.upgrade() else {
+            return;
+        };
+        if view.read(cx).data_import_phase.is_some() {
             return;
         }
-        self.data_import_pending = true;
+        let language = view.read(cx).language;
+        let title = match source {
+            ImportSource::LegacyBackup => tr(
+                language,
+                "导入到当前保存位置？",
+                "Import into current save location?",
+            ),
+            ImportSource::Backup => tr(
+                language,
+                "恢复到当前保存位置？",
+                "Restore into current save location?",
+            ),
+        };
+        let body = tr(
+            language,
+            "将清空并替换当前保存位置中的历史与媒体，然后自动重启。",
+            "Clears and replaces history and media in the current save location, then restarts.",
+        );
+        let detail = tr(
+            language,
+            "写入「本地数据」中的当前保存位置。旧版 ZIP 不含设置；GPUI 备份含设置。",
+            "Writes into the current save location under Local data. Legacy ZIP skips settings; GPUI backup includes them.",
+        );
+        open_settings_danger_dialog(
+            window,
+            cx,
+            owner,
+            SettingsDangerDialog {
+                title,
+                body,
+                detail,
+                cancel_id: "import-current-cancel",
+                confirm_id: "import-current-confirm",
+                error_id: "import-current-error",
+                cancel_label: tr(language, "取消", "Cancel"),
+                confirm_label: tr(language, "选择备份", "Choose backup"),
+                pending_label: tr(language, "正在准备", "Preparing"),
+            },
+            |view| {
+                view.data_import_phase = None;
+            },
+            |view| {
+                (
+                    matches!(view.data_import_phase, Some(ImportPhase::Importing(_))),
+                    None,
+                )
+            },
+            move |view, cx| {
+                view.pick_import_archive_and_restart(source, cx);
+            },
+        );
+    }
+
+    fn pick_import_archive_and_restart(&mut self, source: ImportSource, cx: &mut Context<Self>) {
+        if matches!(self.data_import_phase, Some(ImportPhase::Importing(_))) {
+            return;
+        }
+        self.data_import_phase = Some(ImportPhase::ChoosingPaths(source));
         let language = self.language;
-        let current_directory = self.service.data_dir.clone();
+        let data_dir = self.service.data_dir.clone();
+        let kind = match source {
+            ImportSource::LegacyBackup => "legacy",
+            ImportSource::Backup => "gpui",
+        };
         let prompt = match source {
             ImportSource::LegacyBackup => {
                 tr(language, "选择旧版 ZIP 备份", "Select legacy ZIP backup")
@@ -83,97 +176,254 @@ impl ClipboardView {
         });
         cx.notify();
         cx.spawn(async move |view, cx| {
-            let result: anyhow::Result<Option<ImportOutcome>> = async {
-                let Some(path) = selection.await??.and_then(|paths| paths.into_iter().next())
-                else {
-                    return Ok(None);
-                };
-                let destination = view.update(cx, |_, cx| {
-                    cx.prompt_for_paths(PathPromptOptions {
-                        files: false,
-                        directories: true,
-                        multiple: false,
-                        prompt: Some(
-                            tr(
-                                language,
-                                "选择空目标目录",
-                                "Select empty destination folder",
-                            )
-                            .into(),
-                        ),
-                    })
-                })?;
-                let Some(directory) = destination
-                    .await??
-                    .and_then(|paths| paths.into_iter().next())
-                else {
-                    return Ok(None);
-                };
-                cx.background_executor()
-                    .spawn(async move {
-                        import_to_directory(source, &path, directory, &current_directory, language)
-                    })
-                    .await
-                    .map(Some)
-            }
-            .await;
-            let _ = view.update(cx, |this, cx| {
-                this.data_import_pending = false;
-                match result {
-                    Ok(Some(outcome)) => this.data_import_result = Some(outcome),
-                    Ok(None) => {}
-                    Err(error) => {
+            let picked = selection.await;
+            let ready = view.update(cx, |this, cx| {
+                this.data_import_phase = None;
+                match picked {
+                    Ok(Ok(paths)) => paths.and_then(|paths| paths.into_iter().next()),
+                    Ok(Err(error)) => {
                         this.set_feedback_message(format!(
-                            "{}: {error:#}",
+                            "{}: {error}",
                             tr(this.language, "导入 / 恢复失败", "Import / restore failed")
                         ));
                         this.is_error = true;
+                        cx.notify();
+                        None
+                    }
+                    Err(error) => {
+                        this.set_feedback_message(format!(
+                            "{}: {error}",
+                            tr(this.language, "导入 / 恢复失败", "Import / restore failed")
+                        ));
+                        this.is_error = true;
+                        cx.notify();
+                        None
                     }
                 }
+            });
+            let Ok(Some(path)) = ready else {
+                return;
+            };
+            let queued = view.update(cx, |this, cx| {
+                this.data_import_phase = Some(ImportPhase::Importing(source));
+                this.set_feedback_message(
+                    tr(
+                        this.language,
+                        "已排队导入，即将重启并显示进度",
+                        "Import queued. Restarting with a progress window",
+                    )
+                    .into(),
+                );
+                this.is_error = false;
                 cx.notify();
+                if let Err(error) = clipboard_platform::queue_pending_import(&data_dir, &path, kind)
+                {
+                    this.set_feedback_message(format!(
+                        "{}: {error:#}",
+                        tr(this.language, "导入 / 恢复失败", "Import / restore failed")
+                    ));
+                    this.is_error = true;
+                    this.data_import_phase = None;
+                    cx.notify();
+                    return false;
+                }
+                true
+            });
+            if !matches!(queued, Ok(true)) {
+                return;
+            }
+            // 稍留进度文案，避免“点完直接没了”的假闪退感。
+            cx.background_executor()
+                .timer(Duration::from_millis(900))
+                .await;
+            let _ = view.update(cx, |this, cx| {
+                this.restart_into_data_dir(None, cx);
             });
         })
         .detach();
     }
 
-    pub(super) fn open_imported_data(&mut self, cx: &mut Context<Self>) {
-        let Some(outcome) = &self.data_import_result else {
+    /// 必须在按钮 on_click 里直接调用（不要包一层 entity.update）。
+    pub(super) fn start_change_data_directory(
+        owner: WeakEntity<Self>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let Some(view) = owner.upgrade() else {
             return;
         };
-        let result = std::env::current_exe().and_then(|executable| {
+        if view.read(cx).data_import_phase.is_some() {
+            return;
+        }
+        let language = view.read(cx).language;
+        open_settings_danger_dialog(
+            window,
+            cx,
+            owner,
+            SettingsDangerDialog {
+                title: tr(language, "更改数据保存位置？", "Change data save location?"),
+                body: tr(
+                    language,
+                    "选择空目录后，当前历史会移动过去，并重启到新位置。",
+                    "After you pick an empty folder, current history moves there and the app restarts.",
+                ),
+                detail: tr(
+                    language,
+                    "请选择空目录。现有历史会移动到新位置。",
+                    "Pick an empty folder. Existing history moves to the new location.",
+                ),
+                cancel_id: "relocate-cancel",
+                confirm_id: "relocate-confirm",
+                error_id: "relocate-error",
+                cancel_label: tr(language, "取消", "Cancel"),
+                confirm_label: tr(language, "选择目录", "Choose folder"),
+                pending_label: tr(language, "正在准备", "Preparing"),
+            },
+            |_| {},
+            |_| (false, None),
+            |view, cx| view.pick_data_directory_and_restart(cx),
+        );
+    }
+
+    fn pick_data_directory_and_restart(&mut self, cx: &mut Context<Self>) {
+        let language = self.language;
+        let selection = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some(
+                tr(
+                    language,
+                    "选择新的空数据目录",
+                    "Select a new empty data folder",
+                )
+                .into(),
+            ),
+        });
+        self.data_import_phase = Some(ImportPhase::ChoosingPaths(ImportSource::Backup));
+        cx.notify();
+        cx.spawn(async move |view, cx| {
+            let picked = selection.await;
+            let path = match view.update(cx, |this, cx| {
+                this.data_import_phase = None;
+                match picked {
+                    Ok(Ok(paths)) => paths.and_then(|paths| paths.into_iter().next()),
+                    Ok(Err(error)) => {
+                        this.set_feedback_message(format!(
+                            "{}: {error}",
+                            tr(
+                                this.language,
+                                "更改数据目录失败",
+                                "Failed to change data folder"
+                            )
+                        ));
+                        this.is_error = true;
+                        cx.notify();
+                        None
+                    }
+                    Err(error) => {
+                        this.set_feedback_message(format!(
+                            "{}: {error}",
+                            tr(
+                                this.language,
+                                "更改数据目录失败",
+                                "Failed to change data folder"
+                            )
+                        ));
+                        this.is_error = true;
+                        cx.notify();
+                        None
+                    }
+                }
+            }) {
+                Ok(Some(path)) => path,
+                _ => return,
+            };
+            let queued = view.update(cx, |this, cx| {
+                if let Err(error) = clipboard_platform::queue_pending_relocate(&path) {
+                    this.set_feedback_message(format!(
+                        "{}: {error:#}",
+                        tr(
+                            this.language,
+                            "更改数据目录失败",
+                            "Failed to change data folder"
+                        )
+                    ));
+                    this.is_error = true;
+                    cx.notify();
+                    return false;
+                }
+                true
+            });
+            if !matches!(queued, Ok(true)) {
+                return;
+            }
+            // 不绑定旧 DATA_DIR，启动时执行 relocate 并读新 location。
+            let _ = view.update(cx, |this, cx| {
+                this.restart_into_data_dir(Some(false), cx);
+            });
+        })
+        .detach();
+    }
+
+    /// `bind_current = None/true`：绑定当前 data_dir；`Some(false)`：清除 DATA_DIR，读 location 指针。
+    fn restart_into_data_dir(&mut self, bind_current: Option<bool>, cx: &mut Context<Self>) {
+        let data_dir = self.service.data_dir.clone();
+        let bind = bind_current.unwrap_or(true);
+        // 子进程需等本进程放锁；标记写在当前目录，迁址时再写一份到控制根（路径切换后仍能读到）。
+        if let Err(error) = clipboard_platform::launch_env::mark_wait_for_instance(&data_dir) {
+            self.set_feedback_message(format!(
+                "{}: {error}",
+                tr(self.language, "重启失败", "Failed to restart")
+            ));
+            self.is_error = true;
+            self.data_import_phase = None;
+            cx.notify();
+            return;
+        }
+        if !bind && let Ok(root) = clipboard_platform::control_root() {
+            let _ = clipboard_platform::launch_env::mark_wait_for_instance(&root);
+        }
+        let spawn = std::env::current_exe().and_then(|executable| {
             let mut command = std::process::Command::new(executable);
-            clipboard_platform::launch_env::apply(&mut command, Some(&outcome.directory));
-            clipboard_platform::launch_env::apply_no_monitor(&mut command);
+            if bind {
+                clipboard_platform::launch_env::apply(&mut command, Some(&data_dir));
+            } else {
+                clipboard_platform::launch_env::apply(&mut command, None);
+            }
             command.spawn()
         });
-        match result {
+        match spawn {
             Ok(_) => {
-                self.set_feedback_message(
-                    tr(
-                        self.language,
-                        "已请求预览恢复的数据，不记录剪贴板",
-                        "Requested to preview restored data without recording the clipboard",
-                    )
-                    .into(),
-                );
-                self.is_error = false;
+                self.exiting.set(true);
+                cx.quit();
             }
             Err(error) => {
+                let _ = clipboard_platform::launch_env::take_wait_for_instance(&data_dir);
+                if !bind {
+                    if let Ok(root) = clipboard_platform::control_root() {
+                        let _ = clipboard_platform::launch_env::take_wait_for_instance(&root);
+                        let _ = std::fs::remove_file(root.join(".pending-relocate"));
+                    }
+                } else {
+                    let _ = std::fs::remove_file(data_dir.join(".pending-import"));
+                }
                 self.set_feedback_message(format!(
                     "{}: {error}",
-                    tr(
-                        self.language,
-                        "无法预览恢复的数据，可重试",
-                        "Unable to preview restored data. You can retry",
-                    )
+                    tr(self.language, "重启失败", "Failed to restart")
                 ));
                 self.is_error = true;
+                self.data_import_phase = None;
+                cx.notify();
             }
         }
-        cx.notify();
     }
 }
 
+#[cfg(test)]
+use anyhow::{Context as _, bail};
+
+#[cfg(test)]
 fn import_to_directory(
     source: ImportSource,
     path: &Path,
@@ -239,6 +489,7 @@ fn import_to_directory(
         missing,
         blobs,
         missing_blobs,
+        settings_restored: matches!(source, ImportSource::Backup),
     })
 }
 

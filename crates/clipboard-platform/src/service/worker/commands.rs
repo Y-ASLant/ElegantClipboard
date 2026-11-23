@@ -468,6 +468,20 @@ impl Worker {
                 self.send_event(Event::OnboardingCompleted(result))?;
                 return Ok(());
             }
+            Command::CompleteLegacyMigration => {
+                let result = self
+                    .history
+                    .complete_legacy_migration(&self.data_dir)
+                    .map(|report| super::super::protocol::LegacyMigrationReport {
+                        staged_bytes_removed: report.staged_bytes_removed,
+                        staged_files_removed: report.staged_files_removed,
+                        payloads_cleaned: report.payloads_cleaned,
+                    })
+                    .map_err(|error| error.to_string());
+                self.send_event(Event::LegacyMigrationCompleted(result))?;
+                self.snapshot()?;
+                return Ok(());
+            }
             Command::SetAutostart(enabled) => {
                 let result = autostart::set_enabled(&self.data_dir, enabled)
                     .map(|_| enabled)

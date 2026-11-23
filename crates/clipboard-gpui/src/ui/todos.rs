@@ -67,9 +67,9 @@ impl ClipboardView {
     }
     pub(super) fn sync_search_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let placeholder = if self.todos_open {
-            tr(self.language, "搜索备忘录…", "Search memos…")
+            tr(self.language, "搜索备忘录", "Search memos")
         } else {
-            tr(self.language, "搜索剪贴板历史…", "Search history…")
+            tr(self.language, "搜索剪贴板历史", "Search history")
         };
         self.search.update(cx, |input, cx| {
             input.set_placeholder(placeholder, window, cx)

@@ -57,10 +57,16 @@ pub fn take_wait_for_instance(data_dir: &Path) -> bool {
     true
 }
 
-/// Apply launch env on a child process (preview / tests).
+/// Apply launch env on a child process. `None` clears DATA_DIR so the child
+/// reads `data-location` after a pending relocate (must not inherit the old path).
 pub fn apply(command: &mut std::process::Command, data_dir: Option<&Path>) {
-    if let Some(path) = data_dir {
-        command.env(DATA_DIR, path);
+    match data_dir {
+        Some(path) => {
+            command.env(DATA_DIR, path);
+        }
+        None => {
+            command.env_remove(DATA_DIR);
+        }
     }
 }
 

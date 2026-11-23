@@ -205,7 +205,7 @@ impl ClipboardView {
     }
 
     pub(super) fn confirm_reset_settings(&mut self, cx: &mut Context<Self>) {
-        if self.reset_settings_pending || self.data_import_pending {
+        if self.reset_settings_pending || self.data_import_phase.is_some() {
             return;
         }
         self.reset_settings_error = None;

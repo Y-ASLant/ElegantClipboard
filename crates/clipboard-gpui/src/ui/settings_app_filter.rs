@@ -182,8 +182,8 @@ impl SettingsWindowView {
                                     return content.child(settings_description(
                                         tr(
                                             language,
-                                            "正在读取运行中应用…",
-                                            "Loading running apps…",
+                                            "正在读取运行中应用",
+                                            "Loading running apps",
                                         ),
                                         cx,
                                     ));

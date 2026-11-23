@@ -71,7 +71,8 @@ pub fn import_legacy_database(source: &Path, destination: &Path) -> Result<Impor
     drop(source_db);
     let report = {
         let database = Database::new(staged.clone()).context("旧版数据库升级失败")?;
-        crate::preferences::prune_non_gpui_settings(&database.write_connection().lock())?;
+        // 旧版导入只带走历史数据：用户设置一律丢弃，保留 _migration_* 标记。
+        crate::database::SettingsRepository::new(&database).clear_user_settings()?;
         crate::file_copy_cleanup::clear_file_copy_references(
             &mut database.write_connection().lock(),
         )?;
@@ -133,13 +134,28 @@ mod tests {
             [],
             |row| row.get(0),
         )?;
-        let theme: String = settings.query_row(
-            "SELECT value FROM settings WHERE key = 'gpui_theme_mode'",
+        let theme_count: i64 = settings.query_row(
+            "SELECT COUNT(*) FROM settings WHERE key = 'gpui_theme_mode'",
             [],
             |row| row.get(0),
         )?;
         assert_eq!(secret_count, 0);
-        assert_eq!(theme, "dark");
+        assert_eq!(theme_count, 0);
+        // Database::new 会 INSERT OR IGNORE 产品默认 settings；断言旧库私货不在。
+        let imported_keys: Vec<String> = {
+            let mut statement = settings.prepare("SELECT key FROM settings")?;
+            statement
+                .query_map([], |row| row.get(0))?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        assert!(
+            !imported_keys.iter().any(|key| key == "secret_token"),
+            "legacy secret must not import: {imported_keys:?}"
+        );
+        assert!(
+            !imported_keys.iter().any(|key| key == "gpui_theme_mode"),
+            "legacy/gpui preference rows must not import: {imported_keys:?}"
+        );
         let source_secret_count: i64 = old.write_connection().lock().query_row(
             "SELECT COUNT(*) FROM settings WHERE key = 'secret_token'",
             [],

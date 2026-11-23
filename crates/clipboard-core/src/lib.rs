@@ -13,6 +13,7 @@ pub mod html_text;
 mod image;
 pub mod import;
 pub mod legacy_backup;
+pub mod legacy_migration;
 mod merge;
 pub(crate) mod native_format;
 pub mod preferences;

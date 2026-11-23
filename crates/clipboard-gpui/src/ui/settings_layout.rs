@@ -189,8 +189,8 @@ const SECTIONS: &[Section] = &[
         page: SettingsPage::Data,
         chinese: "导入与恢复",
         english: "Import & restore",
-        description_chinese: "先选择来源文件，再选择空目标目录。不会覆盖、合并或切换当前数据。完成后可以预览恢复的数据，预览不记录剪贴板。1.2.10 请用旧版 ZIP；GPUI 备份用「恢复备份」。「重置应用」只恢复默认设置并重启，不删历史。",
-        description_english: "Select a source file, then an empty destination folder. Current data will not be overwritten, merged or switched. Previewing the restored data does not record the clipboard. Use a legacy ZIP for 1.2.10 data, or Restore backup for a GPUI ZIP. Reset app restores default settings and restarts; history is kept.",
+        description_chinese: "导入/恢复写入当前保存位置（可先在「本地数据」更改位置），会替换该处历史并重启。旧版 ZIP 只导入历史与媒体；GPUI 备份含设置。「重置应用」只恢复默认设置并重启，不删历史。",
+        description_english: "Import/restore writes into the current save location (change it under Local data first if needed), replaces history there, and restarts. Legacy ZIP: history and media only. GPUI backup includes settings. Reset app restores default settings and restarts; history is kept.",
         content: SettingsWindowView::settings_import_content,
     },
     Section {

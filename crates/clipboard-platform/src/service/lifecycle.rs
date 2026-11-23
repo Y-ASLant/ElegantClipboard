@@ -1,3 +1,4 @@
+use super::protocol::LegacyMigrationStatus;
 use super::{
     Command, Event,
     capture::{CaptureState, WatchHandler},
@@ -37,6 +38,7 @@ pub struct Service {
     _instance_lock: File,
     pub data_dir: PathBuf,
     pub initial_data_warning: Option<String>,
+    pub initial_legacy_migration: Option<LegacyMigrationStatus>,
     pub initial_preferences: PreferenceSnapshot,
 }
 
@@ -52,10 +54,25 @@ impl Service {
         // exclusively owned by the worker thread.
         let db = Database::new(data_dir.join("clipboard.db"))?;
         let history = History::new(&db);
-        let initial_data_warning = history
-            .remove_file_copies(&data_dir)
-            .err()
-            .map(|error| format!("清理旧文件副本未完成，将在下次启动重试：{error:#}"));
+        let migration = history.legacy_migration_status(&data_dir)?;
+        let (initial_legacy_migration, initial_data_warning) = if migration.pending {
+            (
+                Some(LegacyMigrationStatus {
+                    pending: true,
+                    staged_bytes: migration.staged_bytes,
+                    staged_count: migration.staged_count,
+                    residual_payloads: migration.residual_payloads,
+                }),
+                None,
+            )
+        } else {
+            // 已确认完成但仍有残留目录时静默重试删除。
+            let warning = history
+                .remove_file_copies(&data_dir)
+                .err()
+                .map(|error| format!("清理旧文件副本未完成，将在下次启动重试：{error:#}"));
+            (None, warning)
+        };
         let preferences = Preferences::new(&db);
         let mut initial_preferences = preferences.snapshot()?;
         if !initial_preferences.onboarding_completed
@@ -89,6 +106,7 @@ impl Service {
             events: events.clone(),
             _instance_lock: instance_lock,
             initial_data_warning,
+            initial_legacy_migration,
             initial_preferences,
             data_dir,
         };

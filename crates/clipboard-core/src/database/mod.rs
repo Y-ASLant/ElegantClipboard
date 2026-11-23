@@ -84,8 +84,11 @@ impl Database {
     fn init_schema(&self) -> Result<(), rusqlite::Error> {
         let conn = self.write_conn.lock();
 
-        Self::run_migrations(&conn)?;
+        let upgraded_from_1_2_10 = Self::run_migrations(&conn)?;
         conn.execute_batch(SCHEMA_SQL)?;
+        if upgraded_from_1_2_10 {
+            crate::legacy_migration::mark_cleanup_ui_needed(&conn)?;
+        }
         Self::run_post_schema_migrations(&conn)?;
         info!("Database schema initialized");
 

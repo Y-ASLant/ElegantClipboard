@@ -19,8 +19,8 @@ impl ClipboardView {
         let search = cx.new(|cx| {
             InputState::new(window, cx).placeholder(tr(
                 language,
-                "搜索剪贴板历史…",
-                "Search history…",
+                "搜索剪贴板历史",
+                "Search history",
             ))
         });
         let subscription = cx.subscribe_in(&search, window, |this, _, event, window, cx| {
@@ -225,7 +225,11 @@ impl ClipboardView {
         let capture_formats = service.initial_preferences.capture_formats.clone();
         let app_filter = service.initial_preferences.app_filter.clone();
         let onboarding_completed = service.initial_preferences.onboarding_completed;
-        if !startup.hidden || tray.is_err() {
+        let legacy_migration_status = service
+            .initial_legacy_migration
+            .filter(|status| status.pending);
+        let show_legacy_migration = legacy_migration_status.is_some();
+        if show_legacy_migration || !startup.hidden || tray.is_err() {
             cx.defer_in(window, |this, window, cx| this.show_window(window, cx));
         }
         #[cfg(windows)]
@@ -277,7 +281,8 @@ impl ClipboardView {
         })
         .detach();
         let list_focus = cx.focus_handle();
-        if startup.show_onboarding && !onboarding_completed {
+        // legacy_migration_status 已在上方计算，供字段初始化与焦点使用。
+        if show_legacy_migration || (startup.show_onboarding && !onboarding_completed) {
             window.focus(&list_focus, cx);
         } else if search_auto_focus && (!startup.hidden || tray.is_err()) {
             search.update(cx, |input, cx| input.focus(window, cx));
@@ -410,6 +415,9 @@ impl ClipboardView {
             onboarding_shortcut: None,
             onboarding_practice: None,
             onboarding_favorites: None,
+            legacy_migration: legacy_migration_status,
+            legacy_migration_pending: false,
+            legacy_migration_error: None,
             settings_window: None,
             todo_toast: None,
             history_menu_window: None,
@@ -441,7 +449,7 @@ impl ClipboardView {
             export_pending: false,
             reset_settings_pending: false,
             reset_settings_error: None,
-            data_import_pending: false,
+            data_import_phase: None,
             data_import_result: None,
             window_position: PendingPref::new(window_position),
             persist_window_size,

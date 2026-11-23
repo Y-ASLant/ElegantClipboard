@@ -108,7 +108,7 @@ fn history_empty_state(
 
     let language = view.language;
     let (icon, zh, en) = if view.history.loading {
-        (IconName::ClipboardList, "正在加载…", "Loading…")
+        (IconName::ClipboardList, "正在加载", "Loading")
     } else if view.history_reply_missed {
         (
             IconName::CircleX,

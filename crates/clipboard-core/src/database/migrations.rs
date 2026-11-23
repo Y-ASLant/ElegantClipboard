@@ -35,26 +35,41 @@ const V2_TABLES: &[&str] = &["native_formats", "captured_formats", "content_hash
 impl Database {
     /// 仅升级 1.2.10：已有当前列、尚无 `note`、也无 2.0 表时补 `note`。
     /// 更早或缺列的库拒绝打开且不改文件。已有 `note` 的当前库跳过；缺 2.0 表由后续 schema 补。
-    pub(super) fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
+    /// 返回是否刚从 1.2.10 补上 `note`（供后续打清理 UI 标记）。
+    pub(super) fn run_migrations(conn: &Connection) -> Result<bool, rusqlite::Error> {
         if !table_exists(conn, "clipboard_items")? {
-            return Ok(());
+            return Ok(false);
         }
-        for name in V1_2_10_COLUMNS {
-            if !column_exists(conn, name)? {
-                return Err(unsupported_database());
-            }
+        let columns = clipboard_item_columns(conn)?;
+        let missing: Vec<&str> = V1_2_10_COLUMNS
+            .iter()
+            .copied()
+            .filter(|name| !columns.contains(*name))
+            .collect();
+        if !missing.is_empty() {
+            return Err(unsupported_database(&format!(
+                "缺少列：{}",
+                missing.join(", ")
+            )));
         }
-        if column_exists(conn, "note")? {
-            return Ok(());
+        if columns.contains("note") {
+            return Ok(false);
         }
+        let mut unexpected = Vec::new();
         for name in V2_TABLES {
             if table_exists(conn, name)? {
-                return Err(unsupported_database());
+                unexpected.push(*name);
             }
+        }
+        if !unexpected.is_empty() {
+            return Err(unsupported_database(&format!(
+                "无 note 却已有 2.0 表：{}",
+                unexpected.join(", ")
+            )));
         }
         info!("Migrating 1.2.10 database: adding note column");
         conn.execute_batch("ALTER TABLE clipboard_items ADD COLUMN note TEXT;")?;
-        Ok(())
+        Ok(true)
     }
 }
 
@@ -66,18 +81,23 @@ fn table_exists(conn: &Connection, name: &str) -> Result<bool, rusqlite::Error> 
     )
 }
 
-fn column_exists(conn: &Connection, name: &str) -> Result<bool, rusqlite::Error> {
-    conn.query_row(
-        "SELECT COUNT(*) > 0 FROM pragma_table_info('clipboard_items') WHERE name = ?1",
-        [name],
-        |row| row.get(0),
-    )
+fn clipboard_item_columns(
+    conn: &Connection,
+) -> Result<std::collections::HashSet<String>, rusqlite::Error> {
+    // 一次性读出列名，避免 pragma_table_info 绑定参数在部分 SQLite 上不稳定。
+    let mut statement = conn.prepare("PRAGMA table_info(clipboard_items)")?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<std::collections::HashSet<_>, _>>()?;
+    Ok(columns)
 }
 
-fn unsupported_database() -> rusqlite::Error {
+fn unsupported_database(detail: &str) -> rusqlite::Error {
     rusqlite::Error::SqliteFailure(
         rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
-        Some("数据库不是 1.2.10 或当前版本，不会升级".into()),
+        Some(format!(
+            "数据库不是 1.2.10 或当前版本，不会升级（{detail}）"
+        )),
     )
 }
 

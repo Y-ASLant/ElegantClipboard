@@ -303,7 +303,7 @@ impl Render for ContentEditorWindow {
                                         div()
                                             .text_size(px(visual::TEXT_SMALL))
                                             .text_color(cx.theme().muted_foreground)
-                                            .child(tr(language, "正在加载…", "Loading…")),
+                                            .child(tr(language, "正在加载", "Loading")),
                                     )
                                 })
                                 .when(rich, |status| {
@@ -364,7 +364,7 @@ impl Render for ContentEditorWindow {
                                 Button::new("editor-save")
                                     .primary()
                                     .label(if pending {
-                                        tr(language, "保存中…", "Saving…")
+                                        tr(language, "保存中", "Saving")
                                     } else {
                                         tr(language, "保存", "Save")
                                     })

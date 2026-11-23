@@ -274,6 +274,9 @@ impl ClipboardView {
             Event::OnboardingCompleted(result) => {
                 self.apply_onboarding_completed(result, window, cx)
             }
+            Event::LegacyMigrationCompleted(result) => {
+                self.apply_legacy_migration_completed(result, window, cx)
+            }
             Event::WindowPositionSaved(result) => self.apply_window_position_saved(result),
             Event::AutostartSaved(result) => self.apply_autostart_saved(result),
             Event::DataSize(result) => self.apply_data_size(result),

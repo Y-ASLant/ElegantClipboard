@@ -30,6 +30,7 @@ mod hover_window;
 use hover_window::HoverPreviewWindowView;
 mod image_assets;
 mod key_intercept;
+mod legacy_migration;
 mod list_surface;
 mod menu_window;
 mod native_health;
@@ -71,6 +72,7 @@ mod shortcut_labels;
 mod shortcut_registration;
 mod shortcuts;
 mod startup;
+pub mod startup_import;
 mod storage;
 mod theme_color;
 mod thumbnail_cache;
@@ -143,8 +145,8 @@ use clipboard_platform::key_intercept::KeyInterceptor;
 use clipboard_platform::outside_click::OutsideClickMonitor;
 use clipboard_platform::source_app::RunningApp;
 use clipboard_platform::{
-    Command, CopyFormat, CopyMode, CopyPurpose, DataSizeInfo, Event, FailureKind, ReleaseInfo,
-    Service, UpdateStatus,
+    Command, CopyFormat, CopyMode, CopyPurpose, DataSizeInfo, Event, FailureKind,
+    LegacyMigrationStatus, ReleaseInfo, Service, UpdateStatus,
 };
 use gpui_kit::component::alert::Alert;
 use gpui_kit::component::dialog::DialogFooter;
@@ -392,6 +394,9 @@ struct ClipboardView {
     onboarding_shortcut: Option<Entity<onboarding::shortcut::OnboardingShortcut>>,
     onboarding_practice: Option<Entity<onboarding::practice::OnboardingPractice>>,
     onboarding_favorites: Option<Entity<onboarding::favorites::OnboardingFavorites>>,
+    legacy_migration: Option<LegacyMigrationStatus>,
+    legacy_migration_pending: bool,
+    legacy_migration_error: Option<String>,
     settings_window: Option<AnyWindowHandle>,
     todo_toast: Option<WindowHandle<todo_toast::TodoToastWindow>>,
     history_menu_window: Option<AnyWindowHandle>,
@@ -423,7 +428,7 @@ struct ClipboardView {
     export_pending: bool,
     reset_settings_pending: bool,
     reset_settings_error: Option<String>,
-    data_import_pending: bool,
+    data_import_phase: Option<data_import::ImportPhase>,
     data_import_result: Option<data_import::ImportOutcome>,
     window_position: PendingPref<WindowPositionPreference>,
     persist_window_size: bool,

@@ -217,6 +217,7 @@ pub enum Command {
         after: bool,
     },
     CompleteOnboarding,
+    CompleteLegacyMigration,
     BumpToTop(i64),
     ResolveQuickPaste {
         request_id: u64,
@@ -495,6 +496,7 @@ pub enum Event {
     RunningApps(Vec<source_app::RunningApp>),
     Todos(Vec<Todo>),
     OnboardingCompleted(Result<(), String>),
+    LegacyMigrationCompleted(Result<LegacyMigrationReport, String>),
     AutostartSaved(Result<bool, String>),
     DataSize(Result<DataSizeInfo, String>),
     DailyCounts(Result<Vec<(String, i64)>, String>),
@@ -507,6 +509,21 @@ pub enum Event {
         message: String,
     },
     Error(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LegacyMigrationStatus {
+    pub pending: bool,
+    pub staged_bytes: u64,
+    pub staged_count: u64,
+    pub residual_payloads: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LegacyMigrationReport {
+    pub staged_bytes_removed: u64,
+    pub staged_files_removed: u64,
+    pub payloads_cleaned: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

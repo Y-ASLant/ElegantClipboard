@@ -437,7 +437,7 @@ impl ClipboardView {
                             Button::new("editor-save")
                                 .primary()
                                 .label(if pending {
-                                    tr(language, "保存中…", "Saving…")
+                                    tr(language, "保存中", "Saving")
                                 } else {
                                     tr(language, "保存", "Save")
                                 })

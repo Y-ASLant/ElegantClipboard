@@ -56,7 +56,7 @@
 | `preferences.rs`、`preferences/types.rs` | 设置键与持久化；设置值类型、默认值和校验 |
 | `preferences/snapshot.rs`、`preferences/backup.rs` | 启动偏好的类型化快照；复用偏好键常量的备份过滤，不更改存储键或格式 |
 | `backup_common.rs::check_central_directory_names` | 新旧 ZIP 共用原始目录项去重与数量校验，避免依赖合并同名条目后漏检 |
-| `backup.rs`、`backup_common.rs`、`import.rs`、`legacy_backup.rs` | GPUI 备份、共享归档校验及旧数据兼容导入 |
+| `backup.rs`、`backup_common.rs`、`import.rs`、`legacy_backup.rs`、`legacy_migration.rs` | GPUI 备份、1.2.10 ZIP 导入、升级后清理 UI 状态 |
 | 各模块的 `tests.rs` / `tests/` | 就近维护的隔离业务测试；仓储测试按记录、查询、保留、分组及设置分类 |
 
 打开已有库时，只有 1.2.10（已具备当前列、没有 `note`，也没有 `native_formats`、`captured_formats`、`content_hash_aliases`）会补上备注列，随后的 schema 再创建 2.0 新表。更早或缺列的库直接拒绝，不改动原文件。已有 `note` 和这些列的当前库不再做结构升级。旧版 ZIP 导入到新目录时按备份内容重写受管图片和图标引用。查询继续使用现有条件构造器。数据库测试通过 `TempDir` 管理临时目录，连接与仓库须先于目录释放。

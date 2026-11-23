@@ -61,77 +61,206 @@ impl SettingsWindowView {
         let folder_owner = self.owner.clone();
         let export_owner = self.owner.clone();
         let clear_all_pending = owner_state.clear_all_pending;
+        let data_dir = clipboard_platform::display_path(&owner_state.service.data_dir);
+        let path_prefix = tr(language, "保存位置：", "Save location: ");
+        let relocate_owner = self.owner.clone();
+        let path_busy = owner_state.data_import_phase.is_some()
+            || clear_all_pending
+            || export_pending
+            || maintenance_pending;
 
-        settings_inline()
+        settings_stack()
             .child(
-                settings_description(data_size_detail, cx)
-                    .w_auto()
-                    .flex_basis(px(360.))
-                    .flex_grow(1.),
+                settings_inline()
+                    .items_center()
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .flex()
+                            .items_center()
+                            .gap(px(visual::SPACE_1))
+                            .child(
+                                div()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(path_prefix),
+                            )
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .flex_1()
+                                    .truncate()
+                                    .font_family("monospace")
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(data_dir),
+                            ),
+                    )
+                    .child(
+                        Button::new("settings-change-data-dir")
+                            .outline()
+                            .h(px(visual::CONTROL_HEIGHT))
+                            .label(tr(language, "更改位置", "Change location"))
+                            .disabled(path_busy)
+                            .on_click(move |_, window, cx| {
+                                ClipboardView::start_change_data_directory(
+                                    relocate_owner.clone(),
+                                    window,
+                                    cx,
+                                );
+                            }),
+                    ),
             )
             .child(
                 settings_inline()
-                    .w_auto()
                     .child(
-                        Button::new("settings-window-refresh")
-                            .outline()
-                            .icon(IconName::RotateCw)
-                            .h(px(visual::CONTROL_HEIGHT_LARGE))
-                            .label(tr(language, "刷新", "Refresh"))
-                            .accessibility_label(tr(language, "刷新占用", "Refresh usage"))
-                            .disabled(data_size_pending || maintenance_pending)
-                            .on_click(move |_, _, cx| {
-                                let _ = refresh_owner.update(cx, |owner, cx| {
-                                    owner.refresh_data_size(cx);
-                                    owner.refresh_daily_counts(cx);
-                                });
-                            }),
+                        settings_description(data_size_detail, cx)
+                            .w_auto()
+                            .flex_basis(px(360.))
+                            .flex_grow(1.),
                     )
                     .child(
-                        Button::new("settings-window-optimize")
-                            .outline()
-                            .icon(IconName::HardDrive)
-                            .h(px(visual::CONTROL_HEIGHT_LARGE))
-                            .label(tr(language, "整理", "Optimize"))
-                            .accessibility_label(tr(language, "整理数据库", "Optimize database"))
-                            .disabled(data_size_pending || maintenance_pending)
-                            .on_click(move |_, _, cx| {
-                                let _ = optimize_owner.update(cx, |owner, cx| {
-                                    if owner.send(Command::OptimizeDatabase, cx) {
-                                        owner.database_maintenance_pending = true;
-                                        cx.notify();
-                                    }
-                                });
-                            }),
-                    )
+                        settings_inline()
+                            .w_auto()
+                            .child(
+                                Button::new("settings-window-refresh")
+                                    .outline()
+                                    .icon(IconName::RotateCw)
+                                    .h(px(visual::CONTROL_HEIGHT_LARGE))
+                                    .label(tr(language, "刷新", "Refresh"))
+                                    .accessibility_label(tr(language, "刷新占用", "Refresh usage"))
+                                    .disabled(data_size_pending || maintenance_pending)
+                                    .on_click(move |_, _, cx| {
+                                        let _ = refresh_owner.update(cx, |owner, cx| {
+                                            owner.refresh_data_size(cx);
+                                            owner.refresh_daily_counts(cx);
+                                        });
+                                    }),
+                            )
+                            .child(
+                                Button::new("settings-window-optimize")
+                                    .outline()
+                                    .icon(IconName::HardDrive)
+                                    .h(px(visual::CONTROL_HEIGHT_LARGE))
+                                    .label(tr(language, "整理", "Optimize"))
+                                    .accessibility_label(tr(
+                                        language,
+                                        "整理数据库",
+                                        "Optimize database",
+                                    ))
+                                    .disabled(data_size_pending || maintenance_pending)
+                                    .on_click(move |_, _, cx| {
+                                        let _ = optimize_owner.update(cx, |owner, cx| {
+                                            if owner.send(Command::OptimizeDatabase, cx) {
+                                                owner.database_maintenance_pending = true;
+                                                cx.notify();
+                                            }
+                                        });
+                                    }),
+                            )
+                            .child(
+                                Button::new("settings-window-folder")
+                                    .outline()
+                                    .icon(IconName::FolderOpen)
+                                    .h(px(visual::CONTROL_HEIGHT_LARGE))
+                                    .label(tr(language, "打开目录", "Open folder"))
+                                    .accessibility_label(tr(
+                                        language,
+                                        "打开数据目录",
+                                        "Open data folder",
+                                    ))
+                                    .on_click(move |_, _, cx| {
+                                        let _ = folder_owner.update(cx, |owner, cx| {
+                                            owner.send(Command::OpenDataDirectory, cx);
+                                        });
+                                    }),
+                            )
+                            .child(
+                                Button::new("settings-window-export")
+                                    .outline()
+                                    .icon(IconName::ExternalLink)
+                                    .h(px(visual::CONTROL_HEIGHT_LARGE))
+                                    .label(tr(language, "导出备份", "Export backup"))
+                                    .accessibility_label(tr(language, "导出备份", "Export backup"))
+                                    .disabled(export_pending)
+                                    .on_click(move |_, _, cx| {
+                                        let _ = export_owner.update(cx, |owner, cx| {
+                                            owner.start_export(cx);
+                                        });
+                                    }),
+                            )
+                            .child(self.clear_all_history_button(language, clear_all_pending)),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    /// 导入/恢复共用进度面：选路径与写入阶段同一套结构，文案按来源区分。
+    fn render_data_import_progress(
+        &self,
+        language: LanguagePreference,
+        phase: data_import::ImportPhase,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        use data_import::{ImportPhase, ImportSource};
+        let (title, detail) = match phase {
+            ImportPhase::ChoosingPaths(ImportSource::LegacyBackup) => (
+                tr(language, "选择旧版备份", "Choosing legacy backup"),
+                tr(
+                    language,
+                    "选择 1.2.10 ZIP。确认后写入当前保存位置并重启（不含旧设置）。",
+                    "Pick a 1.2.10 ZIP. It writes into the current save location and restarts (no legacy settings).",
+                ),
+            ),
+            ImportPhase::ChoosingPaths(ImportSource::Backup) => (
+                tr(language, "选择 GPUI 备份", "Choosing GPUI backup"),
+                tr(
+                    language,
+                    "选择 GPUI 备份。确认后完整恢复到当前保存位置并重启。",
+                    "Pick a GPUI backup. It fully restores into the current save location and restarts.",
+                ),
+            ),
+            ImportPhase::Importing(ImportSource::LegacyBackup)
+            | ImportPhase::Importing(ImportSource::Backup) => (
+                tr(
+                    language,
+                    "正在准备导入并重启",
+                    "Preparing import and restart",
+                ),
+                tr(
+                    language,
+                    "即将重启并写入当前保存位置。",
+                    "The app will restart and write into the current save location.",
+                ),
+            ),
+        };
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(px(visual::SPACE_2))
+            .p(px(visual::SPACE_3))
+            .rounded(cx.theme().radius)
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().secondary)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(visual::SPACE_2))
                     .child(
-                        Button::new("settings-window-folder")
-                            .outline()
-                            .icon(IconName::FolderOpen)
-                            .h(px(visual::CONTROL_HEIGHT_LARGE))
-                            .label(tr(language, "打开目录", "Open folder"))
-                            .accessibility_label(tr(language, "打开数据目录", "Open data folder"))
-                            .on_click(move |_, _, cx| {
-                                let _ = folder_owner.update(cx, |owner, cx| {
-                                    owner.send(Command::OpenDataDirectory, cx);
-                                });
-                            }),
+                        gpui_kit::component::spinner::Spinner::new()
+                            .with_size(gpui_kit::component::Size::Small)
+                            .color(cx.theme().primary),
                     )
-                    .child(
-                        Button::new("settings-window-export")
-                            .outline()
-                            .icon(IconName::ExternalLink)
-                            .h(px(visual::CONTROL_HEIGHT_LARGE))
-                            .label(tr(language, "导出备份…", "Export backup…"))
-                            .accessibility_label(tr(language, "导出备份", "Export backup"))
-                            .disabled(export_pending)
-                            .on_click(move |_, _, cx| {
-                                let _ = export_owner.update(cx, |owner, cx| {
-                                    owner.start_export(cx);
-                                });
-                            }),
-                    )
-                    .child(self.clear_all_history_button(language, clear_all_pending)),
+                    .child(div().text_size(px(14.)).font_semibold().child(title)),
+            )
+            .child(
+                div()
+                    .text_size(px(13.))
+                    .text_color(cx.theme().muted_foreground)
+                    .whitespace_normal()
+                    .child(detail),
             )
             .into_any_element()
     }
@@ -142,10 +271,13 @@ impl SettingsWindowView {
             return div().into_any_element();
         };
         let language = owner.language;
-        let pending = owner.data_import_pending;
+        let phase = owner.data_import_phase;
         let reset_pending = owner.reset_settings_pending;
-        let outcome = owner.data_import_result.as_ref();
-        let open_owner = self.owner.clone();
+        let outcome_description = owner
+            .data_import_result
+            .as_ref()
+            .filter(|_| phase.is_none())
+            .map(|outcome| (outcome.is_incomplete(), outcome.description(language)));
         let choices = [
             (
                 "import-legacy-zip",
@@ -158,7 +290,8 @@ impl SettingsWindowView {
                 ImportSource::Backup,
             ),
         ];
-        let busy = pending || reset_pending;
+        let busy = phase.is_some() || reset_pending;
+        let progress = phase.map(|phase| self.render_data_import_progress(language, phase, cx));
         settings_stack()
             .child(
                 settings_inline()
@@ -169,19 +302,20 @@ impl SettingsWindowView {
                             .h(px(visual::CONTROL_HEIGHT))
                             .label(label)
                             .disabled(busy)
-                            .on_click(move |_, _, cx| {
-                                let _ = owner
-                                    .update(cx, |owner, cx| owner.start_data_import(source, cx));
+                            .on_click(move |_, window, cx| {
+                                ClipboardView::start_data_import(
+                                    owner.clone(),
+                                    source,
+                                    window,
+                                    cx,
+                                );
                             })
                     }))
-                    .child(self.reset_settings_button(language, reset_pending, pending)),
+                    .child(self.reset_settings_button(language, reset_pending, phase.is_some())),
             )
-            .when(pending, |content| {
-                content.child(settings_description(tr(language, "正在选择路径或恢复数据…", "Selecting paths or restoring data…"), cx))
-            })
-            .when_some(outcome, |content, outcome| {
-                let mut description = outcome.description(language);
-                let result = if outcome.is_incomplete() {
+            .when_some(progress, |content, progress| content.child(progress))
+            .when_some(outcome_description, |content, (incomplete, mut description)| {
+                let result = if incomplete {
                     description.push_str(tr(
                         language,
                         "。要找回缺失的附件，请将完整备份恢复到另一个空目录。",
@@ -193,18 +327,7 @@ impl SettingsWindowView {
                 } else {
                     settings_description(description, cx).into_any_element()
                 };
-                content
-                    .child(result)
-                    .child(
-                        settings_inline().child(
-                            Button::new("open-restored-data").outline().h(px(visual::CONTROL_HEIGHT))
-                                .label(tr(language, "预览恢复的数据", "Preview restored data"))
-                                .disabled(busy)
-                                .on_click(move |_, _, cx| {
-                                    let _ = open_owner.update(cx, |owner, cx| owner.open_imported_data(cx));
-                                }),
-                        ),
-                    )
+                content.child(result)
             })
             .into_any_element()
     }
@@ -248,7 +371,7 @@ impl SettingsWindowView {
                         error_id: "reset-settings-error",
                         cancel_label: tr(language, "取消", "Cancel"),
                         confirm_label: tr(language, "重置并重启", "Reset and restart"),
-                        pending_label: tr(language, "正在重置…", "Resetting…"),
+                        pending_label: tr(language, "正在重置", "Resetting"),
                     },
                     |view| view.reset_settings_error = None,
                     |view| (view.reset_settings_pending, view.reset_settings_error.clone()),
@@ -296,7 +419,7 @@ impl SettingsWindowView {
                         error_id: "clear-all-error",
                         cancel_label: tr(language, "取消", "Cancel"),
                         confirm_label: tr(language, "删除", "Delete"),
-                        pending_label: tr(language, "正在删除…", "Deleting…"),
+                        pending_label: tr(language, "正在删除", "Deleting"),
                     },
                     |view| view.clear_all_error = None,
                     |view| (view.clear_all_pending, view.clear_all_error.clone()),

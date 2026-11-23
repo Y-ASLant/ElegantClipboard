@@ -230,7 +230,7 @@ impl ClipboardView {
                             Button::new("group-delete-confirm")
                                 .danger()
                                 .label(if view.group_delete_pending {
-                                    tr(language, "正在删除分组…", "Deleting group…")
+                                    tr(language, "正在删除分组", "Deleting group")
                                 } else {
                                     tr(
                                         language,

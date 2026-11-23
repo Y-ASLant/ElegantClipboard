@@ -70,7 +70,7 @@ impl ClipboardView {
     pub(super) fn render_search_status(&self, window: &Window, cx: &Context<Self>) -> Div {
         let status: SharedString = self.paste_mode_label(window).into();
         let detail: SharedString = if self.reorder_pending || self.todo_reorder_pending {
-            tr(self.language, "正在保存…", "Saving…").into()
+            tr(self.language, "正在保存", "Saving").into()
         } else {
             self.status_count_label().into()
         };

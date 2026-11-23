@@ -34,7 +34,7 @@ fn onboarding_completion_and_existing_history_are_recognized() -> Result<()> {
 }
 
 #[test]
-fn startup_removes_legacy_file_copies_and_keeps_original_paths_and_history() -> Result<()> {
+fn startup_defers_legacy_file_copy_cleanup_until_migration_command() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
     let original = root.join("original.txt");
@@ -64,7 +64,28 @@ fn startup_removes_legacy_file_copies_and_keeps_original_paths_and_history() -> 
     drop(history);
     let (service, events) = Service::start(Some(root.to_owned()), false)?;
     assert!(service.initial_data_warning.is_none());
+    let migration = service
+        .initial_legacy_migration
+        .expect("staged residue should open cleanup UI");
+    assert!(migration.pending);
+    assert!(migration.staged_count >= 1);
+    assert!(root.join("staged").exists());
     let rows = next_snapshot(&events, 0);
+    service.send(Command::CompleteLegacyMigration)?;
+    let report = wait_for(
+        &events,
+        std::time::Duration::from_secs(5),
+        "legacy migration did not complete",
+        |event| match event {
+            Event::LegacyMigrationCompleted(Ok(report)) => Some(report),
+            Event::LegacyMigrationCompleted(Err(error)) => panic!("{error}"),
+            Event::Error(message) | Event::BackgroundError(message) => panic!("{message}"),
+            Event::CommandFailed { message, .. } => panic!("{message}"),
+            _ => None,
+        },
+    );
+    assert!(report.staged_files_removed >= 1);
+    assert!(report.payloads_cleaned >= 1);
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].id, id);
     assert!(rows[0].is_favorite);

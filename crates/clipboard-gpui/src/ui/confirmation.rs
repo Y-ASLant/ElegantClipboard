@@ -259,12 +259,12 @@ impl ClipboardView {
                         match kind {
                             HistoryConfirmation::Group(_) => tr(
                                 language,
-                                "正在删除分组…",
-                                "Deleting group…",
+                                "正在删除分组",
+                                "Deleting group",
                             ),
                             HistoryConfirmation::Selection
                             | HistoryConfirmation::Item(_) => {
-                                tr(language, "正在删除…", "Deleting…")
+                                tr(language, "正在删除", "Deleting")
                             }
                         }
                         .to_owned()

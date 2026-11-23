@@ -6,6 +6,10 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        if self.legacy_migration_visible() {
+            self.favorite_drop.bounds.set(None);
+            return self.render_legacy_migration(window, cx).into_any_element();
+        }
         if self.onboarding_visible() {
             self.favorite_drop.bounds.set(None);
             return self.render_onboarding(window, cx).into_any_element();

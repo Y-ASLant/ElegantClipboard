@@ -353,7 +353,7 @@ impl ClipboardView {
                     .primary()
                     .h(px(visual::CONTROL_HEIGHT_LARGE))
                     .label(if pending {
-                        tr(language, "正在保存…", "Saving…")
+                        tr(language, "正在保存", "Saving")
                     } else if step != OnboardingStep::Preferences {
                         tr(language, "下一步", "Continue")
                     } else if self.reviewing_onboarding() {
