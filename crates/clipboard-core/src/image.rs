@@ -207,9 +207,22 @@ impl History {
         drop(connection);
         // 全量清空后按引用回收不够：历史裁剪/导入失败会留下孤儿文件。
         // 直接重置受管媒体目录（images/icons/staged/blobs）。
+        let mut warnings = Vec::new();
+        if let Some(warning) = self.wipe_managed_media_dirs(images_dir) {
+            warnings.push(warning);
+        }
+        // DELETE 不缩文件；VACUUM 才能把 clipboard.db 体积收回。
+        if let Err(error) = self.optimize_storage() {
+            warnings.push(format!("{error:#}"));
+            tracing::warn!(error = %error, "Vacuum after clear all failed");
+        }
         Ok(DeletionOutcome {
             deleted,
-            cleanup_warning: self.wipe_managed_media_dirs(images_dir),
+            cleanup_warning: if warnings.is_empty() {
+                None
+            } else {
+                Some(warnings.join("; "))
+            },
         })
     }
 

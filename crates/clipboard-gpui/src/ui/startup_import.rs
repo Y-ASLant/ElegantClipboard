@@ -81,7 +81,6 @@ impl Render for StartupImportView {
             .child(
                 div()
                     .text_size(title_size)
-                    .font_semibold()
                     .child(self.title.clone()),
             )
             .child(
@@ -105,7 +104,7 @@ impl Render for StartupImportView {
                             .gap(px(visual::SPACE_2))
                             .text_color(cx.theme().muted_foreground)
                             .child(div().flex_1().child(self.detail.clone()))
-                            .child(div().font_semibold().child(percent_label)),
+                            .child(div().child(percent_label)),
                     ),
             )
             .when_some(self.error.clone(), |col, error| {

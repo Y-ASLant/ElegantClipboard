@@ -164,6 +164,39 @@ fn clear_all_removes_protected_records_and_media_but_keeps_groups_and_settings()
     Ok(())
 }
 
+
+#[test]
+fn clear_all_vacuums_database_file() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let db_path = directory.path().join("clipboard.db");
+    let history = History::open(db_path.clone())?;
+    let images = directory.path().join("images");
+    {
+        let connection = history.db.write_connection();
+        let connection = connection.lock();
+        connection.execute_batch(
+            "CREATE TABLE clear_all_fixture (payload BLOB NOT NULL);
+             INSERT INTO clear_all_fixture(payload) VALUES (zeroblob(8 * 1024 * 1024));
+             DELETE FROM clear_all_fixture;
+             DROP TABLE clear_all_fixture;
+             PRAGMA wal_checkpoint(TRUNCATE);",
+        )?;
+    }
+    let before = std::fs::metadata(&db_path)?.len();
+    let outcome = history.clear_all_with_media(&images)?;
+    assert!(
+        outcome.cleanup_warning.is_none(),
+        "cleanup/vacuum warning: {:?}",
+        outcome.cleanup_warning
+    );
+    let after = std::fs::metadata(&db_path)?.len();
+    assert!(
+        after < before / 2,
+        "expected vacuum shrink before={before} after={after}"
+    );
+    Ok(())
+}
+
 #[test]
 fn clear_history_stops_before_deleting_rows_with_unreadable_media_paths() -> Result<()> {
     let directory = tempfile::tempdir()?;
