@@ -90,8 +90,8 @@ impl SettingsWindowView {
             .child(settings_description(
                 if !explicitly_saved {
                     tr(language,
-                        "尚未应用到全部分组：仅新采集时默认组保留 10000 条，不按天清理。首次保存需要确认。",
-                        "Not applied to all groups: only new captures limit the default group to 10000 items, with no age limit. The first save requires confirmation.").to_owned()
+                        "尚未应用到全部分组：默认不限条数、不按天清理。首次保存需要确认。",
+                        "Not applied to all groups yet: default is unlimited count and no age limit. The first save requires confirmation.").to_owned()
                 } else if language == LanguagePreference::English {
                     format!("Saved: {} days, {} items per group", saved.value.days, saved.value.max_count)
                 } else {

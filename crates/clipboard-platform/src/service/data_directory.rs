@@ -157,18 +157,46 @@ fn managed_names() -> &'static [&'static str] {
     ]
 }
 
-fn remove_managed(data_dir: &Path) -> Result<()> {
+fn remove_managed_with_retry(data_dir: &Path, progress: &mut dyn FnMut(f32, &str)) -> Result<()> {
+    use std::{thread, time::Duration};
     for name in managed_names() {
         let path = data_dir.join(name);
         if !path.exists() {
             continue;
         }
-        if path.is_dir() {
-            fs::remove_dir_all(&path)
-                .with_context(|| format!("无法删除旧数据：{}", path.display()))?;
-        } else {
-            fs::remove_file(&path)
-                .with_context(|| format!("无法删除旧数据：{}", path.display()))?;
+        let mut last_error = None;
+        for attempt in 0..40 {
+            let result = if path.is_dir() {
+                fs::remove_dir_all(&path)
+            } else {
+                fs::remove_file(&path)
+            };
+            match result {
+                Ok(()) => {
+                    last_error = None;
+                    break;
+                }
+                Err(error) if path.exists() => {
+                    last_error = Some(error);
+                    if attempt == 0 || attempt % 5 == 0 {
+                        progress(3.0, "数据文件仍被占用，正在重试");
+                    }
+                    thread::sleep(Duration::from_millis(150));
+                }
+                Err(_) => {
+                    // 竞态下文件已消失
+                    last_error = None;
+                    break;
+                }
+            }
+        }
+        if let Some(error) = last_error {
+            return Err(error).with_context(|| {
+                format!(
+                    "无法删除旧数据：{}（请先完全退出 ElegantClipboard 及其他打开该库的程序）",
+                    path.display()
+                )
+            });
         }
     }
     Ok(())
@@ -332,6 +360,14 @@ pub fn has_pending_import(data_dir: &Path) -> bool {
 }
 
 pub fn apply_pending_import(data_dir: &Path) -> Result<Option<String>> {
+    apply_pending_import_with_progress(data_dir, &mut |_, _| {})
+}
+
+/// `progress(percent 0..=100, label)` 供启动进度窗刷新。
+pub fn apply_pending_import_with_progress(
+    data_dir: &Path,
+    progress: &mut dyn FnMut(f32, &str),
+) -> Result<Option<String>> {
     let job_path = data_dir.join(PENDING_IMPORT_FILE);
     if !job_path.is_file() {
         return Ok(None);
@@ -339,23 +375,45 @@ pub fn apply_pending_import(data_dir: &Path) -> Result<Option<String>> {
     let job: PendingImport =
         serde_json::from_slice(&fs::read(&job_path).context("无法读取导入任务")?)
             .context("导入任务损坏")?;
-    let _ = fs::remove_file(&job_path);
-    remove_managed(data_dir)?;
-    match job.kind.as_str() {
-        "legacy" => {
-            let report =
-                clipboard_core::legacy_backup::import_legacy_backup(&job.source, data_dir)?;
-            Ok(Some(format!(
-                "已导入旧版数据 {} 条",
-                report.items.total_items
-            )))
-        }
-        "gpui" => {
-            let report = clipboard_core::backup::restore_backup(&job.source, data_dir)?;
-            Ok(Some(format!("已恢复备份 {} 条", report.total_items)))
-        }
-        other => bail!("未知导入类型：{other}"),
+    progress(1.0, "等待其他实例释放数据目录");
+    // 旧进程或其它程序占着 clipboard.db 时删除会 os error 32；先等 instance.lock。
+    if let Err(error) = wait_until_instance_released(data_dir) {
+        // 等锁失败仍清掉任务，避免每次启动都弹失败窗死循环。
+        let _ = fs::remove_file(&job_path);
+        return Err(error);
     }
+    progress(3.0, "清理当前数据");
+    if let Err(error) = remove_managed_with_retry(data_dir, progress) {
+        let _ = fs::remove_file(&job_path);
+        return Err(error);
+    }
+    let result = (|| -> Result<Option<String>> {
+        match job.kind.as_str() {
+            "legacy" => {
+                let report = clipboard_core::legacy_backup::import_legacy_backup_with_progress(
+                    &job.source,
+                    data_dir,
+                    progress,
+                )?;
+                Ok(Some(format!(
+                    "已导入旧版数据 {} 条",
+                    report.items.total_items
+                )))
+            }
+            "gpui" => {
+                let report = clipboard_core::backup::restore_backup_with_progress(
+                    &job.source,
+                    data_dir,
+                    progress,
+                )?;
+                Ok(Some(format!("已恢复备份 {} 条", report.total_items)))
+            }
+            other => bail!("未知导入类型：{other}"),
+        }
+    })();
+    // 已开始清理后无论成败都清任务，避免启动反复弹窗。
+    let _ = fs::remove_file(&job_path);
+    result
 }
 
 /// 启动前只处理目录迁移；导入改在可见进度窗执行。

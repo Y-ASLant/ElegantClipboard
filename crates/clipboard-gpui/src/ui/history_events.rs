@@ -212,6 +212,7 @@ impl ClipboardView {
                     .detach();
                 }
                 self.refresh_daily_counts(cx);
+                self.refresh_data_size(cx);
                 window.focus(&self.list_focus, cx);
             }
             Err(error) => {

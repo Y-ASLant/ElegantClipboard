@@ -139,6 +139,13 @@ fn clear_all_removes_protected_records_and_media_but_keeps_groups_and_settings()
     crate::preferences::Preferences::new(&database)
         .set_theme(crate::preferences::ThemePreference::Dark)?;
 
+    let icons = directory.path().join("icons");
+    std::fs::create_dir_all(&icons)?;
+    let orphan_image = images.join("orphan-leftover.png");
+    let orphan_icon = icons.join("orphan-icon.ico");
+    std::fs::write(&orphan_image, b"orphan image")?;
+    std::fs::write(&orphan_icon, b"orphan icon")?;
+
     assert_eq!(history.clear_all_with_media(&images)?.deleted, 4);
 
     assert_eq!(history.count("", false)?, 0);
@@ -150,6 +157,10 @@ fn clear_all_removes_protected_records_and_media_but_keeps_groups_and_settings()
     );
     assert!(!image_path.exists());
     assert!(!staged.exists());
+    assert!(!orphan_image.exists());
+    assert!(!orphan_icon.exists());
+    assert!(images.is_dir());
+    assert!(icons.is_dir());
     Ok(())
 }
 

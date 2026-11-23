@@ -17,6 +17,15 @@ use zip::ZipArchive;
 /// Restore a GPUI ZIP backup into an unused data directory. The caller holds
 /// the destination instance lock and must not have an open database there.
 pub fn restore_backup(archive_path: &Path, data_dir: &Path) -> Result<RestoreReport> {
+    restore_backup_with_progress(archive_path, data_dir, &mut |_, _| {})
+}
+
+pub fn restore_backup_with_progress(
+    archive_path: &Path,
+    data_dir: &Path,
+    progress: &mut dyn FnMut(f32, &str),
+) -> Result<RestoreReport> {
+    progress(0.0, "准备恢复");
     ensure_destination_unused(data_dir, "恢复")?;
     let source = File::open(archive_path).context("无法打开备份文件")?;
     let mut raw_source = source.try_clone()?;
@@ -27,6 +36,7 @@ pub fn restore_backup(archive_path: &Path, data_dir: &Path) -> Result<RestoreRep
         MAX_ENTRIES,
         MAX_ARCHIVE_BYTES,
     )?;
+    progress(4.0, "读取备份说明");
     let manifest: Manifest = {
         let mut entry = archive
             .by_name("manifest.json")
@@ -55,7 +65,10 @@ pub fn restore_backup(archive_path: &Path, data_dir: &Path) -> Result<RestoreRep
             bail!("备份数据库长度不一致");
         }
     }
+    progress(10.0, "解压备份媒体");
     let mut extracted: HashMap<String, HashSet<String>> = HashMap::new();
+    let entry_count = archive.len().max(1);
+    let mut last_bucket = -1i32;
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index)?;
         let name = entry.name()?.into_owned();
@@ -114,8 +127,16 @@ pub fn restore_backup(archive_path: &Path, data_dir: &Path) -> Result<RestoreRep
         if copied != entry.size() {
             bail!("备份媒体条目长度不一致：{name}");
         }
+        let extract_pct = ((index + 1) as f32 / entry_count as f32) * 100.0;
+        let overall = 10.0 + extract_pct * 0.65; // 10..=75
+        let bucket = overall.floor() as i32;
+        if bucket != last_bucket {
+            last_bucket = bucket;
+            progress(overall, "解压备份媒体");
+        }
     }
 
+    progress(78.0, "整理设置与媒体路径");
     let mut restored_db = Connection::open(&staged_db)?;
     crate::file_copy_cleanup::clear_file_copy_references(&mut restored_db)?;
     let tx = restored_db.transaction()?;
@@ -139,6 +160,7 @@ pub fn restore_backup(archive_path: &Path, data_dir: &Path) -> Result<RestoreRep
     crate::import::checkpoint_staged_database(&restored_db)?;
     drop(restored_db);
 
+    progress(92.0, "安装到数据目录");
     install_staged_tree(
         stage.path(),
         &staged_db,
@@ -146,6 +168,11 @@ pub fn restore_backup(archive_path: &Path, data_dir: &Path) -> Result<RestoreRep
         "无法安装备份媒体文件",
         "无法安装备份数据库",
     )?;
+    // 备份未带 gpui_retention 时，禁止回落采集默认 10000 条上限。
+    let installed = crate::database::Database::new(data_dir.join("clipboard.db"))
+        .context("无法打开已恢复的数据库")?;
+    crate::History::new(&installed).preserve_imported_history_limits()?;
+    progress(100.0, "恢复完成");
     Ok(RestoreReport {
         total_items,
         restored_images: extracted.get("images").map_or(0, HashSet::len),

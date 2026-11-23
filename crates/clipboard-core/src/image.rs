@@ -197,27 +197,44 @@ impl History {
     /// Delete every history record, including pinned and favorite items,
     /// while preserving groups and settings.
     pub fn clear_all_with_media(&self, images_dir: &Path) -> Result<DeletionOutcome> {
-        let images = self.repo.get_all_image_paths()?;
-        let payloads = self.repo.get_all_file_payloads()?;
         let connection = self.db.write_connection();
         let mut connection = connection.lock();
         let tx = connection.transaction()?;
-        let blobs = {
-            let mut statement = tx.prepare(
-                "SELECT DISTINCT blob_hash FROM native_formats WHERE blob_hash IS NOT NULL",
-            )?;
-            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
-            rows.flatten().collect::<Vec<_>>()
-        };
         tx.execute("DELETE FROM native_formats", [])?;
         tx.execute("DELETE FROM content_hash_aliases", [])?;
         let deleted = tx.execute("DELETE FROM clipboard_items", [])? as i64;
         tx.commit()?;
         drop(connection);
+        // 全量清空后按引用回收不够：历史裁剪/导入失败会留下孤儿文件。
+        // 直接重置受管媒体目录（images/icons/staged/blobs）。
         Ok(DeletionOutcome {
             deleted,
-            cleanup_warning: self.cleanup_media(images, payloads, blobs, images_dir),
+            cleanup_warning: self.wipe_managed_media_dirs(images_dir),
         })
+    }
+
+    fn wipe_managed_media_dirs(&self, images_dir: &Path) -> Option<String> {
+        let data_dir = images_dir.parent().unwrap_or(images_dir);
+        let blob_root = self.blob_root().ok();
+        let mut targets = vec![
+            images_dir.to_path_buf(),
+            data_dir.join("icons"),
+            data_dir.join("staged"),
+        ];
+        if let Some(blobs) = blob_root {
+            targets.push(blobs);
+        }
+        let errors: Vec<String> = targets
+            .into_iter()
+            .filter_map(|path| reset_media_directory(&path).err().map(|e| format!("{e:#}")))
+            .collect();
+        if errors.is_empty() {
+            None
+        } else {
+            let warning = errors.join("; ");
+            tracing::warn!(%warning, "Managed media wipe incomplete after clear all");
+            Some(warning)
+        }
     }
 
     pub(crate) fn cleanup_media(
@@ -310,6 +327,20 @@ pub(crate) fn remove_media_file(path: &Path) -> Result<()> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error).with_context(|| format!("无法回收附件 {}", path.display())),
     }
+}
+
+/// 清空并重建受管媒体目录；目录不存在则创建空目录。
+fn reset_media_directory(path: &Path) -> Result<()> {
+    match std::fs::remove_dir_all(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error).with_context(|| format!("无法清空媒体目录 {}", path.display()));
+        }
+    }
+    std::fs::create_dir_all(path)
+        .with_context(|| format!("无法重建媒体目录 {}", path.display()))?;
+    Ok(())
 }
 
 pub struct SavedImage {

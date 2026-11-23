@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// Limits apply independently to each group's unpinned, non-favorite items.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RetentionPolicy {
     /// Zero disables age-based removal. Age follows the stored local creation timestamp.
@@ -14,16 +14,15 @@ pub struct RetentionPolicy {
     pub max_count: u32,
 }
 
-impl Default for RetentionPolicy {
-    fn default() -> Self {
+impl RetentionPolicy {
+    /// Same as [`Default`]: unlimited age and count.
+    pub const fn unlimited() -> Self {
         Self {
             days: 0,
-            max_count: 10_000,
+            max_count: 0,
         }
     }
-}
 
-impl RetentionPolicy {
     pub fn requires_confirmation(self, previous: Self) -> bool {
         (self.days > 0 && (previous.days == 0 || self.days < previous.days))
             || (self.max_count > 0
@@ -32,6 +31,32 @@ impl RetentionPolicy {
 }
 
 impl History {
+    /// Bulk import/restore: if retention was never saved, persist the unlimited default.
+    ///
+    /// Marks the policy as explicitly saved so UI and maintenance use the same unlimited
+    /// limits the unsaved default already implies.
+    pub fn preserve_imported_history_limits(&self) -> Result<()> {
+        let connection = self.db.write_connection();
+        let connection = connection.lock();
+        let existing: Option<String> = connection
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                [RETENTION_KEY],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if existing.is_some() {
+            return Ok(());
+        }
+        let policy = RetentionPolicy::unlimited();
+        connection.execute(
+            "INSERT INTO settings (key, value, updated_at)
+             VALUES (?1, ?2, datetime('now', 'localtime'))",
+            params![RETENTION_KEY, serde_json::to_string(&policy)?],
+        )?;
+        Ok(())
+    }
+
     /// Persist and apply a confirmed policy atomically. On SQL failure neither changes.
     pub fn save_retention(
         &self,

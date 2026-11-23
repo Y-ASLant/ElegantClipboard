@@ -127,11 +127,19 @@ pub(super) fn open_settings_danger_dialog(
         let keyboard_owner = owner.clone();
         let cancel_owner = owner.clone();
         let read_cancel = read_state.clone();
+        let read_confirm = read_state.clone();
+        let read_confirm_ok = read_state.clone();
         let confirm_click = on_confirm.clone();
         let confirm_ok = on_confirm.clone();
         dialog_shell(shell, cx)
             .title(dialog_title(title, cx))
             .on_ok(move |_, window, cx| {
+                if keyboard_owner
+                    .upgrade()
+                    .is_some_and(|entity| read_confirm_ok(entity.read(cx)).0)
+                {
+                    return false;
+                }
                 let _ = keyboard_owner.update(cx, |view, cx| confirm_ok(view, cx));
                 window.refresh();
                 false
@@ -169,13 +177,20 @@ pub(super) fn open_settings_danger_dialog(
                     .child(
                         Button::new(confirm_id)
                             .danger()
+                            // pending 时仍用实心红底白字；disabled 会淡成粉底灰字。
+                            .loading(pending)
                             .label(if pending {
                                 pending_label
                             } else {
                                 confirm_label
                             })
-                            .disabled(pending)
                             .on_click(move |_, window, cx| {
+                                if confirm_owner
+                                    .upgrade()
+                                    .is_some_and(|entity| read_confirm(entity.read(cx)).0)
+                                {
+                                    return;
+                                }
                                 let _ =
                                     confirm_owner.update(cx, |view, cx| confirm_click(view, cx));
                                 window.refresh();

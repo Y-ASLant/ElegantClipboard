@@ -34,8 +34,9 @@ pub use data::{
     show_existing_instance,
 };
 pub use data_directory::{
-    PendingImport, apply_pending_import, apply_startup_jobs, control_root, display_path,
-    has_pending_import, queue_pending_import, queue_pending_relocate, set_data_location,
+    PendingImport, apply_pending_import, apply_pending_import_with_progress, apply_startup_jobs,
+    control_root, display_path, has_pending_import, queue_pending_import, queue_pending_relocate,
+    set_data_location,
 };
 pub use lifecycle::Service;
 pub use protocol::{

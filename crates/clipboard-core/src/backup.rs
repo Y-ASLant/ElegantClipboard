@@ -14,7 +14,7 @@ use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 
 mod restore;
 
-pub use restore::restore_backup;
+pub use restore::{restore_backup, restore_backup_with_progress};
 
 const FORMAT_VERSION: u32 = 2;
 

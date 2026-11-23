@@ -27,6 +27,15 @@ pub(crate) fn checkpoint_staged_database(connection: &Connection) -> Result<()> 
 /// Import a consistent snapshot without changing the legacy database.
 /// The caller must hold the destination instance lock throughout this call.
 pub fn import_legacy_database(source: &Path, destination: &Path) -> Result<ImportReport> {
+    import_legacy_database_with_progress(source, destination, &mut |_, _| {})
+}
+
+/// `progress(percent 0..=100, label)` 仅覆盖本阶段内部进度；调用方负责映射到总进度。
+pub fn import_legacy_database_with_progress(
+    source: &Path,
+    destination: &Path,
+    progress: &mut dyn FnMut(f32, &str),
+) -> Result<ImportReport> {
     if destination.exists() {
         bail!("GPUI 数据库已存在，导入不会覆盖现有历史");
     }
@@ -35,6 +44,7 @@ pub fn import_legacy_database(source: &Path, destination: &Path) -> Result<Impor
     }
     let parent = destination.parent().context("GPUI 数据库路径缺少父目录")?;
     std::fs::create_dir_all(parent).context("无法创建 GPUI 数据目录")?;
+    progress(1.0, "读取旧版数据库");
     let source_db = Connection::open_with_flags(source, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .context("无法只读打开旧版数据库")?;
     let valid: bool = source_db.query_row(
@@ -54,10 +64,25 @@ pub fn import_legacy_database(source: &Path, destination: &Path) -> Result<Impor
         let mut staged_db = Connection::open(&staged)?;
         let backup = Backup::new(&source_db, &mut staged_db)?;
         let mut last_progress = Instant::now();
+        let mut last_reported = -1i32;
         loop {
             match backup.step(64).context("备份旧版数据库失败")? {
                 StepResult::Done => break,
-                StepResult::More => last_progress = Instant::now(),
+                StepResult::More => {
+                    last_progress = Instant::now();
+                    let snap = backup.progress();
+                    let copy_pct = if snap.pagecount > 0 {
+                        ((snap.pagecount - snap.remaining) as f32 / snap.pagecount as f32) * 100.0
+                    } else {
+                        0.0
+                    };
+                    let pct = 5.0 + copy_pct * 0.65; // 5..=70
+                    let bucket = (pct / 2.0).floor() as i32;
+                    if bucket != last_reported {
+                        last_reported = bucket;
+                        progress(pct, "复制数据库页");
+                    }
+                }
                 StepResult::Busy | StepResult::Locked => {
                     if last_progress.elapsed() > Duration::from_secs(10) {
                         bail!("旧版数据库持续被占用，导入已中止");
@@ -67,12 +92,16 @@ pub fn import_legacy_database(source: &Path, destination: &Path) -> Result<Impor
             }
             std::thread::sleep(Duration::from_millis(25));
         }
+        progress(70.0, "数据库复制完成");
     }
     drop(source_db);
     let report = {
+        progress(72.0, "升级数据库结构");
         let database = Database::new(staged.clone()).context("旧版数据库升级失败")?;
         // 旧版导入只带走历史数据：用户设置一律丢弃，保留 _migration_* 标记。
         crate::database::SettingsRepository::new(&database).clear_user_settings()?;
+        // 避免「未保存保留策略时新采集默认 10000 条」把导入的历史裁掉。
+        crate::History::new(&database).preserve_imported_history_limits()?;
         crate::file_copy_cleanup::clear_file_copy_references(
             &mut database.write_connection().lock(),
         )?;
@@ -89,7 +118,9 @@ pub fn import_legacy_database(source: &Path, destination: &Path) -> Result<Impor
         checkpoint_staged_database(&database.write_connection().lock())?;
         report
     };
+    progress(95.0, "写入目标数据库");
     std::fs::rename(&staged, destination).context("无法将导入副本移入 GPUI 数据目录")?;
+    progress(100.0, "数据库就绪");
     Ok(report)
 }
 

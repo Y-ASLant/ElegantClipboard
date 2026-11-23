@@ -6,6 +6,7 @@ mod backup;
 mod capture_formats;
 mod corner_radius;
 mod fonts;
+pub use fonts::peek_fonts;
 mod hover_preview;
 mod snapshot;
 mod types;

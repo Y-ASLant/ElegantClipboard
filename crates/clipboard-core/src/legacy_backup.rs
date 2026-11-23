@@ -6,7 +6,7 @@ use crate::backup_common::{
     check_central_directory_names, ensure_destination_unused, install_staged_tree,
     remap_media_rows, verify_staged_database,
 };
-use crate::import::{ImportReport, import_legacy_database};
+use crate::import::ImportReport;
 use anyhow::{Context, Result, bail};
 use rusqlite::Connection;
 use std::{
@@ -42,6 +42,15 @@ impl Assets {
 }
 
 pub fn import_legacy_backup(archive_path: &Path, data_dir: &Path) -> Result<LegacyBackupReport> {
+    import_legacy_backup_with_progress(archive_path, data_dir, &mut |_, _| {})
+}
+
+pub fn import_legacy_backup_with_progress(
+    archive_path: &Path,
+    data_dir: &Path,
+    progress: &mut dyn FnMut(f32, &str),
+) -> Result<LegacyBackupReport> {
+    progress(0.0, "准备导入");
     let data_dir = fs::canonicalize(data_dir).context("无法解析目标数据目录")?;
     ensure_destination_unused(&data_dir, "导入")?;
     let source = File::open(archive_path).context("无法打开旧版备份")?;
@@ -60,6 +69,8 @@ pub fn import_legacy_backup(archive_path: &Path, data_dir: &Path) -> Result<Lega
     let mut seen_db = false;
     let mut assets = Assets::default();
     let mut total_bytes = 0u64;
+    let entry_count = archive.len().max(1);
+    let mut last_extract_bucket = -1i32;
 
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index)?;
@@ -125,13 +136,28 @@ pub fn import_legacy_backup(archive_path: &Path, data_dir: &Path) -> Result<Lega
         if copied != entry.size() {
             bail!("备份条目长度不一致：{name}");
         }
+        let extract_pct = ((index + 1) as f32 / entry_count as f32) * 100.0;
+        let overall = 2.0 + extract_pct * 0.48; // 2..=50
+        let bucket = (overall / 1.0).floor() as i32;
+        if bucket != last_extract_bucket {
+            last_extract_bucket = bucket;
+            progress(overall, "解压备份文件");
+        }
     }
     if !seen_db {
         bail!("旧版备份缺少 clipboard.db");
     }
 
     let staged_db = stage.path().join("clipboard.db");
-    let items = import_legacy_database(&raw_db, &staged_db)?;
+    progress(52.0, "迁移历史数据库");
+    let items = crate::import::import_legacy_database_with_progress(
+        &raw_db,
+        &staged_db,
+        &mut |pct, label| {
+            progress(52.0 + pct * 0.33, label); // 52..=85
+        },
+    )?;
+    progress(86.0, "整理媒体路径");
     let mut connection = Connection::open(&staged_db)?;
     let mut unbundled_images = 0;
     {
@@ -152,6 +178,7 @@ pub fn import_legacy_backup(archive_path: &Path, data_dir: &Path) -> Result<Lega
     crate::import::checkpoint_staged_database(&connection)?;
     drop(connection);
 
+    progress(92.0, "安装到数据目录");
     install_staged_tree(
         stage.path(),
         &staged_db,
@@ -159,6 +186,7 @@ pub fn import_legacy_backup(archive_path: &Path, data_dir: &Path) -> Result<Lega
         "无法安装旧版媒体文件",
         "无法安装旧版数据库",
     )?;
+    progress(100.0, "导入完成");
     Ok(LegacyBackupReport {
         items,
         images: assets.images.len(),

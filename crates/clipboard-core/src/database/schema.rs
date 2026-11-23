@@ -176,7 +176,7 @@ CREATE TABLE IF NOT EXISTS todos (
 -- Insert default settings
 INSERT OR IGNORE INTO settings (key, value) VALUES
     ('global_shortcut', 'Alt+C'),
-    ('max_history_count', '10000'),
+    ('max_history_count', '0'),
     ('max_content_size_kb', '1024'),
     ('max_image_size_kb', '51200'),
     ('dedup_strategy', 'move_to_top'),
@@ -184,7 +184,7 @@ INSERT OR IGNORE INTO settings (key, value) VALUES
     ('autostart_enabled', 'false'),
     ('theme', 'system'),
     ('language', 'zh-CN'),
-    ('auto_cleanup_days', '30'),
+    ('auto_cleanup_days', '0'),
     ('paste_key', 'ctrl_v');
 "#;
 

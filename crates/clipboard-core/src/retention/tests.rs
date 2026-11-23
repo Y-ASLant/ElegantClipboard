@@ -118,19 +118,14 @@ fn upgrade_preserves_custom_groups_until_first_policy_is_confirmed() -> Result<(
     history.capture_with_media("new default group item", &images)?;
     assert_eq!(history.count_in_group("", false, Some(group.id))?, 10001);
     assert!(!Preferences::new(&db).retention_saved()?);
-    assert!(
-        history
-            .save_retention(RetentionPolicy::default(), false, &images)
-            .is_err()
-    );
+    let capped = RetentionPolicy {
+        days: 0,
+        max_count: 10_000,
+    };
+    assert!(history.save_retention(capped, false, &images).is_err());
     assert_eq!(history.count_in_group("", false, Some(group.id))?, 10001);
     assert!(!Preferences::new(&db).retention_saved()?);
-    assert_eq!(
-        history
-            .save_retention(RetentionPolicy::default(), true, &images)?
-            .deleted,
-        1
-    );
+    assert_eq!(history.save_retention(capped, true, &images)?.deleted, 1);
     assert!(Preferences::new(&db).retention_saved()?);
     assert_eq!(history.count_in_group("", false, Some(group.id))?, 10000);
     assert_eq!(history.count("", false)?, 1);
@@ -159,5 +154,58 @@ fn unlimited_retention_keeps_aged_items_and_does_not_depend_on_page_limit() -> R
     assert_eq!(history.apply_retention(&images)?.deleted, 0);
     assert_eq!(history.count("", false)?, 10001);
     assert_eq!(history.list("", i64::MAX, false)?.len(), 10000);
+    Ok(())
+}
+
+#[test]
+fn imported_history_survives_capture_without_prior_retention() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let db = Database::new(dir.path().join("clipboard.db"))?;
+    let history = History::new(&db);
+    let images = dir.path().join("images");
+    std::fs::create_dir_all(&images)?;
+    db.write_connection().lock().execute_batch(
+        "WITH RECURSIVE numbers(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM numbers WHERE n<12000)
+         INSERT INTO clipboard_items(content_type, content_hash, semantic_hash, text_content, created_at)
+         SELECT 'text', 'import-' || n, 'import-' || n, 'entry', '2020-01-01 00:00:00' FROM numbers;",
+    )?;
+    assert_eq!(history.count("", false)?, 12000);
+    assert!(!Preferences::new(&db).retention_saved()?);
+    history.preserve_imported_history_limits()?;
+    assert!(Preferences::new(&db).retention_saved()?);
+    assert_eq!(
+        Preferences::new(&db).retention()?,
+        RetentionPolicy {
+            days: 0,
+            max_count: 0
+        }
+    );
+    history.capture_with_media("post-import capture", &images)?;
+    // unlimited policy keeps the imported bulk; capture only adds one row
+    assert_eq!(history.count("", false)?, 12001);
+    assert_eq!(history.apply_retention(&images)?.deleted, 0);
+    Ok(())
+}
+
+#[test]
+fn unsaved_default_is_unlimited_on_capture() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let db = Database::new(dir.path().join("clipboard.db"))?;
+    let history = History::new(&db);
+    let images = dir.path().join("images");
+    std::fs::create_dir_all(&images)?;
+    db.write_connection().lock().execute_batch(
+        "WITH RECURSIVE numbers(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM numbers WHERE n<10001)
+         INSERT INTO clipboard_items(content_type, content_hash, semantic_hash, text_content, created_at)
+         SELECT 'text', 'bulk-' || n, 'bulk-' || n, 'entry', '2020-01-01 00:00:00' FROM numbers;",
+    )?;
+    assert!(!Preferences::new(&db).retention_saved()?);
+    assert_eq!(
+        Preferences::new(&db).retention()?,
+        RetentionPolicy::default()
+    );
+    history.capture_with_media("one more", &images)?;
+    assert_eq!(history.count("", false)?, 10002);
+    assert_eq!(history.apply_retention(&images)?.deleted, 0);
     Ok(())
 }
