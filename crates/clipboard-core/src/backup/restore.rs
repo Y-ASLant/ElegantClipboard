@@ -62,8 +62,13 @@ pub fn restore_backup(archive_path: &Path, data_dir: &Path) -> Result<RestoreRep
         if name == "clipboard.db" || name == "manifest.json" {
             continue;
         }
-        if matches!(name.as_str(), "images/" | "icons/" | "staged/" | "blobs/") && entry.is_dir() {
-            continue;
+        if entry.is_dir() {
+            if matches!(name.as_str(), "images/" | "icons/" | "staged/" | "blobs/")
+                || name.starts_with("staged/")
+            {
+                continue;
+            }
+            bail!("备份媒体条目无效：{name}");
         }
         let Some((category, filename)) = name.split_once('/') else {
             bail!("备份包含未知文件：{name}");
@@ -73,11 +78,28 @@ pub fn restore_backup(archive_path: &Path, data_dir: &Path) -> Result<RestoreRep
         {
             bail!("备份包含未知文件：{name}");
         }
+        // 兼容识别旧备份条目，但不再落盘普通文件副本。
+        if category == "staged" {
+            if filename.is_empty()
+                || filename.len() > 512
+                || filename.split(['/', '\\']).any(|segment| {
+                    segment.is_empty()
+                        || segment == "."
+                        || segment == ".."
+                        || segment.chars().any(|ch| {
+                            ch.is_control() || matches!(ch, ':' | '<' | '>' | '"' | '|' | '?' | '*')
+                        })
+                })
+                || entry.size() > MAX_ASSET_BYTES
+            {
+                bail!("备份媒体条目无效：{name}");
+            }
+            continue;
+        }
         if filename.is_empty()
             || !filename
                 .bytes()
                 .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
-            || entry.is_dir()
             || entry.size() > MAX_ASSET_BYTES
             || !extracted
                 .entry(category.to_owned())
@@ -85,10 +107,6 @@ pub fn restore_backup(archive_path: &Path, data_dir: &Path) -> Result<RestoreRep
                 .insert(filename.to_owned())
         {
             bail!("备份媒体条目无效：{name}");
-        }
-        // 兼容识别旧备份条目，但不再落盘普通文件副本。
-        if category == "staged" {
-            continue;
         }
         let media_path = stage.path().join(category).join(filename);
         fs::create_dir_all(media_path.parent().context("备份媒体路径无父目录")?)?;

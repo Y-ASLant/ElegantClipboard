@@ -67,8 +67,14 @@ pub fn import_legacy_backup(archive_path: &Path, data_dir: &Path) -> Result<Lega
         if name == "manifest.json" {
             bail!("这是 GPUI 格式备份，请在设置中使用「恢复备份」");
         }
-        if matches!(name.as_str(), "images/" | "icons/" | "staged/") && entry.is_dir() {
-            continue;
+        if entry.is_dir() {
+            // 1.2.10 副本在 staged/<hash>/ 下，目录项只跳过不落盘。
+            if matches!(name.as_str(), "images/" | "icons/" | "staged/")
+                || name.starts_with("staged/")
+            {
+                continue;
+            }
+            bail!("备份条目过大或类型无效：{name}");
         }
         let limit = if name == "clipboard.db" {
             MAX_DATABASE_BYTES
@@ -79,7 +85,7 @@ pub fn import_legacy_backup(archive_path: &Path, data_dir: &Path) -> Result<Lega
             .checked_add(entry.size())
             .filter(|sum| *sum <= MAX_ARCHIVE_BYTES)
             .context("备份展开后超过允许大小")?;
-        if entry.size() > limit || entry.is_dir() {
+        if entry.size() > limit {
             bail!("备份条目过大或类型无效：{name}");
         }
         let destination = if name == "clipboard.db" {
@@ -163,17 +169,28 @@ pub fn import_legacy_backup(archive_path: &Path, data_dir: &Path) -> Result<Lega
 
 fn checked_asset_name(name: &str) -> Result<(&str, &str)> {
     let (category, filename) = name.split_once('/').context("备份包含未知文件")?;
-    if !matches!(category, "images" | "icons" | "staged")
-        || filename.is_empty()
-        || filename == "."
-        || filename == ".."
-        || filename.len() > 255
-        || filename.ends_with([' ', '.'])
-        || filename.chars().any(|ch| {
-            ch.is_control() || matches!(ch, '/' | '\\' | ':' | '<' | '>' | '"' | '|' | '?' | '*')
-        })
-    {
+    if !matches!(category, "images" | "icons" | "staged") {
         bail!("备份中的媒体路径无效：{name}");
+    }
+    // 1.2.10 的 staged 为 staged/<hash>/<file>；images/icons 仍须单层文件名。
+    let max_len = if category == "staged" { 512 } else { 255 };
+    if filename.is_empty() || filename.len() > max_len {
+        bail!("备份中的媒体路径无效：{name}");
+    }
+    if category != "staged" && filename.contains(['/', '\\']) {
+        bail!("备份中的媒体路径无效：{name}");
+    }
+    for segment in filename.split(['/', '\\']) {
+        if segment.is_empty()
+            || segment == "."
+            || segment == ".."
+            || segment.ends_with([' ', '.'])
+            || segment
+                .chars()
+                .any(|ch| ch.is_control() || matches!(ch, ':' | '<' | '>' | '"' | '|' | '?' | '*'))
+        {
+            bail!("备份中的媒体路径无效：{name}");
+        }
     }
     Ok((category, filename))
 }

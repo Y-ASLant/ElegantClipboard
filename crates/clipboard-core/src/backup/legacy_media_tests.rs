@@ -72,3 +72,36 @@ fn old_zip_preserves_unbundled_paths_and_rebases_windows_basename() -> Result<()
     assert_eq!(mapped["metadata"], "preserved");
     Ok(())
 }
+
+#[test]
+fn old_zip_skips_nested_staged_hash_paths() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let source = directory.path().join("source.db");
+    let history = History::open(source.clone())?;
+    let id = history.capture("nested staged legacy")?.unwrap();
+    crate::import::checkpoint_staged_database(&history.db.write_connection().lock())?;
+    drop(history);
+
+    let archive_path = directory.path().join("legacy-nested-staged.zip");
+    let mut zip = ZipWriter::new(File::create(&archive_path)?);
+    zip.start_file("clipboard.db", SimpleFileOptions::default())?;
+    zip.write_all(&fs::read(&source)?)?;
+    zip.add_directory("staged/0188edf8/", SimpleFileOptions::default())?;
+    zip.start_file(
+        "staged/0188edf8/9a3ab99a_1d2c3749dc328fd1d3600b946ff6630d.png",
+        SimpleFileOptions::default(),
+    )?;
+    zip.write_all(b"\x89PNG\r\n\x1a\nstaged-copy")?;
+    zip.finish()?;
+
+    let target = directory.path().join("restored");
+    fs::create_dir_all(&target)?;
+    let report = import_legacy_backup(&archive_path, &target)?;
+    assert_eq!(report.items.total_items, 1);
+    assert!(!target.join("staged").exists());
+    assert_eq!(
+        History::open(target.join("clipboard.db"))?.text(id)?,
+        "nested staged legacy"
+    );
+    Ok(())
+}
