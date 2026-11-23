@@ -158,9 +158,24 @@ impl Database {
         Ok(())
     }
 
+    /// 读写双连接时直接 VACUUM 会拿不到 exclusive lock（Windows 上常见“整理了体积不变”）。
+    /// 先关掉只读连接，checkpoint + VACUUM，再挂回只读连接。
     pub fn vacuum(&self) -> Result<(), rusqlite::Error> {
-        let conn = self.write_conn.lock();
-        conn.execute_batch("VACUUM;")?;
+        let write = self.write_conn.lock();
+        let mut read = self.read_conn.lock();
+        // 释放只读句柄，否则 VACUUM 无法独占文件。
+        *read = Connection::open_in_memory()?;
+        write.execute_batch(
+            "PRAGMA wal_checkpoint(TRUNCATE);
+             VACUUM;
+             PRAGMA wal_checkpoint(TRUNCATE);",
+        )?;
+        let reopened = Connection::open_with_flags(
+            &self.db_path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        Self::configure_connection(&reopened, true)?;
+        *read = reopened;
         info!("Database vacuumed");
         Ok(())
     }

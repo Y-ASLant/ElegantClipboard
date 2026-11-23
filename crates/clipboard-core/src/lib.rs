@@ -406,16 +406,8 @@ impl History {
 
     pub fn optimize_storage(&self) -> Result<()> {
         self.db.optimize().context("更新数据库统计失败")?;
+        // vacuum 内部会关掉只读连接并做 wal_checkpoint + VACUUM。
         self.db.vacuum().context("回收数据库空闲空间失败")?;
-        let busy: i64 = self
-            .db
-            .write_connection()
-            .lock()
-            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| row.get(0))
-            .context("合并数据库日志失败")?;
-        if busy != 0 {
-            bail!("数据库日志正在使用，无法完成空间回收");
-        }
         Ok(())
     }
 

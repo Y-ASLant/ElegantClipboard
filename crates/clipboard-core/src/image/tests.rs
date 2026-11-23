@@ -170,6 +170,11 @@ fn clear_all_vacuums_database_file() -> Result<()> {
     let db_path = directory.path().join("clipboard.db");
     let history = History::open(db_path.clone())?;
     let images = directory.path().join("images");
+    // 保持读写双连接占用（贴近 Service 运行时），再塞大块空闲页。
+    let _read_hold = history.db.read_connection();
+    let _ = _read_hold
+        .lock()
+        .query_row("SELECT 1", [], |row| row.get::<_, i64>(0))?;
     {
         let connection = history.db.write_connection();
         let connection = connection.lock();
@@ -193,6 +198,8 @@ fn clear_all_vacuums_database_file() -> Result<()> {
         after < before / 2,
         "expected vacuum shrink before={before} after={after}"
     );
+    // 只读连接应已挂回，仍可查询。
+    assert_eq!(history.count("", false)?, 0);
     Ok(())
 }
 
