@@ -77,10 +77,13 @@ impl ClipboardView {
 
     /// Text input needs real focus for the IME; navigation works without it.
     fn activate_for_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if window.is_window_active() || self.typing_activation.is_some() {
+        if window.is_window_active() {
             return;
         }
         native_window::activate_for_input(window);
+        if self.typing_activation.is_some() {
+            return;
+        }
         let main = window.window_handle();
         self.typing_activation = Some(cx.spawn_in(window, async move |view, cx| {
             let mut active = false;

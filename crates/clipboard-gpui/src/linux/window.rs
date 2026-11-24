@@ -1,4 +1,4 @@
-use gpui_kit::Window;
+use gpui_kit::{Bounds, Pixels, Window};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use x11rb::{
     connection::Connection,
@@ -103,6 +103,9 @@ pub fn activate_for_input(window: &Window) {
     }
     window.activate_window();
 }
+
+/// No-op on Linux: X11 click activation is governed by the WM input hint.
+pub fn set_click_activate_bounds(_window: &Window, _bounds: Option<Bounds<Pixels>>) {}
 
 /// Keep or drop `_NET_WM_STATE_ABOVE` without asking for focus.
 pub fn set_above(window: &Window, above: bool) {

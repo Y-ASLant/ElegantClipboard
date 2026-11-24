@@ -8,10 +8,12 @@ impl ClipboardView {
     ) -> AnyElement {
         if self.legacy_migration_visible() {
             self.favorite_drop.bounds.set(None);
+            native_window::set_click_activate_bounds(window, None);
             return self.render_legacy_migration(window, cx).into_any_element();
         }
         if self.onboarding_visible() {
             self.favorite_drop.bounds.set(None);
+            native_window::set_click_activate_bounds(window, None);
             return self.render_onboarding(window, cx).into_any_element();
         }
         let chrome = self.list_chrome.clone();
@@ -76,6 +78,7 @@ impl ClipboardView {
                     .flex_none()
                     .child(
                         div()
+                            .relative()
                             .key_context("HistorySearch")
                             .on_action(cx.listener(
                                 |this, _: &FocusFirstHistoryItem, window, cx| {
@@ -90,7 +93,20 @@ impl ClipboardView {
                                     this.focus_search_for_input(window, cx);
                                 }),
                             )
-                            .child(Styled::h(search, px(visual::CONTROL_HEIGHT))),
+                            .child(Styled::h(search, px(visual::CONTROL_HEIGHT)))
+                            .child(
+                                canvas(
+                                    |bounds, window, _| {
+                                        native_window::set_click_activate_bounds(
+                                            window,
+                                            Some(bounds),
+                                        );
+                                    },
+                                    |_, _, _, _| {},
+                                )
+                                .absolute()
+                                .inset_0(),
+                            ),
                     ),
             )
             .child(
