@@ -54,6 +54,9 @@ try {
         $versionQuad = "$($Matches[1]).$($Matches[2]).$($Matches[3]).$build"
         $setupName = "ElegantClipboard-v$($package[0].version)-windows-x64-setup.exe"
         $setup = Join-Path $packageRoot $setupName
+        # GHA/本机：choco 写入 Machine PATH 后当前进程可能仍是旧 PATH。
+        $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
+            [Environment]::GetEnvironmentVariable('Path', 'User')
         $makensis = Get-Command makensis -ErrorAction SilentlyContinue
         if ($makensis) {
             $makensis = $makensis.Source

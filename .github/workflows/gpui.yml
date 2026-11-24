@@ -43,8 +43,28 @@ jobs:
       - name: Install NSIS
         shell: pwsh
         run: |
+          # choco 成功码不保证本 job PATH/落盘可用；合并后偶发「Install NSIS ✓」但 makensis 找不到。
           choco install nsis -y --no-progress
           if ($LASTEXITCODE -ne 0) { throw "NSIS install failed: $LASTEXITCODE" }
+          $candidates = @(
+            (Join-Path ${env:ProgramFiles} 'NSIS\makensis.exe'),
+            (Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe')
+          )
+          $makensis = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+          if (-not $makensis) {
+            choco install nsis -y --force --no-progress
+            if ($LASTEXITCODE -ne 0) { throw "NSIS force reinstall failed: $LASTEXITCODE" }
+            $makensis = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+          }
+          if (-not $makensis) {
+            throw "makensis missing after choco install. Checked: $($candidates -join '; ')"
+          }
+          $nsisDir = Split-Path -Parent $makensis
+          Add-Content -Path $env:GITHUB_PATH -Value $nsisDir
+          $env:Path = "$nsisDir;$env:Path"
+          & $makensis /VERSION
+          if ($LASTEXITCODE -ne 0) { throw "makensis /VERSION failed: $LASTEXITCODE" }
+          Write-Host "NSIS ready: $makensis"
       - name: Build Windows package
         run: ./scripts/package-gpui-windows.ps1
       - name: Built and unpacked Windows startup
