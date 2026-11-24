@@ -367,7 +367,11 @@ impl ClipboardView {
     }
 
     /// `bind_current = None/true`：绑定当前 data_dir；`Some(false)`：清除 DATA_DIR，读 location 指针。
-    fn restart_into_data_dir(&mut self, bind_current: Option<bool>, cx: &mut Context<Self>) {
+    pub(super) fn restart_into_data_dir(
+        &mut self,
+        bind_current: Option<bool>,
+        cx: &mut Context<Self>,
+    ) {
         let data_dir = self.service.data_dir.clone();
         let bind = bind_current.unwrap_or(true);
         // 子进程需等本进程放锁；标记写在当前目录，迁址时再写一份到控制根（路径切换后仍能读到）。

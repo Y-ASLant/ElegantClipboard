@@ -345,8 +345,8 @@ impl SettingsWindowView {
             .label(tr(language, "重置应用", "Reset app"))
             .tooltip(tr(
                 language,
-                "恢复默认设置，保留剪贴板历史",
-                "Restore default settings; keep clipboard history",
+                "恢复默认设置与默认保存位置，保留剪贴板历史",
+                "Restore default settings and save location; keep clipboard history",
             ))
             .disabled(reset_pending || import_pending)
             .on_click(move |_, window, cx| {
@@ -358,13 +358,13 @@ impl SettingsWindowView {
                         title: tr(language, "重置应用设置？", "Reset app settings?"),
                         body: tr(
                             language,
-                            "主题、热键、粘贴与采集等设置将恢复默认。",
-                            "Theme, hotkeys, paste, and capture settings return to defaults.",
+                            "主题、热键、粘贴与采集等设置将恢复默认；自定义保存位置也会改回默认目录。",
+                            "Theme, hotkeys, paste, and capture settings return to defaults. A custom save location moves back to the default folder.",
                         ),
                         detail: tr(
                             language,
-                            "剪贴板历史、分组与图片不会删除。完成后应用会自动重启。",
-                            "Clipboard history, groups, and images are kept. The app restarts when done.",
+                            "剪贴板历史、分组与图片会随数据一并保留并迁回默认位置。完成后应用会自动重启。",
+                            "Clipboard history, groups, and images are kept and moved to the default location. The app restarts when done.",
                         ),
                         cancel_id: "reset-settings-cancel",
                         confirm_id: "reset-settings-confirm",

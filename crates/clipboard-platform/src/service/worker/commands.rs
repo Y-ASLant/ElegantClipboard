@@ -511,11 +511,14 @@ impl Worker {
                 return Ok(());
             }
             Command::ResetApplicationSettings => {
-                self.send_event(Event::ApplicationSettingsReset(
-                    self.history
-                        .reset_application_settings()
-                        .map_err(|error| error.to_string()),
-                ))?;
+                let result = (|| -> Result<()> {
+                    self.history.reset_application_settings()?;
+                    crate::service::data_directory::reset_location_to_default(&self.data_dir)
+                        .context("设置已恢复默认，但保存位置未能改回默认目录")?;
+                    Ok(())
+                })()
+                .map_err(|error| error.to_string());
+                self.send_event(Event::ApplicationSettingsReset(result))?;
                 return Ok(());
             }
             Command::OpenDataDirectory => {

@@ -94,6 +94,15 @@ pub fn set_data_location(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// 恢复默认保存位置：已在控制根则清指针；否则排队迁回控制根（下次启动 apply）。
+pub fn reset_location_to_default(current: &Path) -> Result<()> {
+    let root = control_root()?;
+    if same_path(current, &root) {
+        return set_data_location(&root);
+    }
+    queue_pending_relocate(&root)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingImport {
     pub source: PathBuf,

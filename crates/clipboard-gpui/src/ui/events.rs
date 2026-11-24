@@ -292,7 +292,11 @@ impl ClipboardView {
                 match result {
                     Ok(()) => {
                         self.reset_settings_error = None;
-                        self.restart_application(window, cx);
+                        // 可能已排队迁回默认目录：勿再绑定旧 DATA_DIR。
+                        if self.prepare_app_exit(cx) {
+                            self.close_editor(window, cx);
+                            self.restart_into_data_dir(Some(false), cx);
+                        }
                     }
                     Err(error) => {
                         self.reset_settings_error = Some(error.clone());
