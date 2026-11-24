@@ -330,14 +330,6 @@ impl RowTranslation {
     }
 }
 
-impl IntoElement for RowTranslation {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-}
-
 impl Element for RowTranslation {
     type RequestLayoutState = ();
     type PrepaintState = ();
