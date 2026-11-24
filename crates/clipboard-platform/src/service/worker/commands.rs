@@ -510,16 +510,8 @@ impl Worker {
                 self.send_event(Event::DatabaseOptimized(size))?;
                 return Ok(());
             }
-            Command::ResetApplicationSettings => {
-                let result = (|| -> Result<()> {
-                    self.history.reset_application_settings()?;
-                    crate::service::data_directory::reset_location_to_default(&self.data_dir)
-                        .context("设置已恢复默认，但保存位置未能改回默认目录")?;
-                    Ok(())
-                })()
-                .map_err(|error| error.to_string());
-                self.send_event(Event::ApplicationSettingsReset(result))?;
-                return Ok(());
+            Command::ResetApplication(scope) => {
+                return self.handle_reset_application(scope);
             }
             Command::OpenDataDirectory => {
                 open_data_directory(&self.data_dir)?;

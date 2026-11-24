@@ -1,4 +1,6 @@
 use super::{Event, Worker};
+use crate::service::data_directory::reset_location_to_default;
+use crate::service::protocol::ResetApplicationScope;
 use anyhow::{Context, Result, anyhow};
 use clipboard_core::DeletionOutcome;
 
@@ -52,6 +54,41 @@ impl Worker {
             Event::AllHistoryCleared,
             "全部历史已删除，但列表或分组计数刷新失败，请重启应用后查看",
         )
+    }
+
+    pub(super) fn handle_reset_application(&mut self, scope: ResetApplicationScope) -> Result<()> {
+        if !scope.any() {
+            return self.fail_application_reset("未选择任何重置项");
+        }
+        if scope.settings
+            && let Err(error) = self.history.reset_application_settings()
+        {
+            return self.fail_application_reset(error.to_string());
+        }
+        if scope.history {
+            match self.history.clear_all_with_media(&self.images_dir) {
+                Ok(outcome) => self.finish_deletion(
+                    Ok(outcome),
+                    Event::AllHistoryCleared,
+                    "全部历史已删除，但列表或分组计数刷新失败，请重启应用后查看",
+                )?,
+                Err(error) => return self.fail_application_reset(error.to_string()),
+            }
+        }
+        if scope.data_location
+            && let Err(error) = reset_location_to_default(&self.data_dir)
+        {
+            return self.fail_application_reset(format!(
+                "其它项已处理，但保存位置未能改回默认目录：{error}"
+            ));
+        }
+        self.send_event(Event::ApplicationSettingsReset(Ok(scope)))?;
+        Ok(())
+    }
+
+    fn fail_application_reset(&mut self, message: impl Into<String>) -> Result<()> {
+        self.send_event(Event::ApplicationSettingsReset(Err(message.into())))?;
+        Ok(())
     }
 
     fn finish_deletion(

@@ -41,7 +41,7 @@ pub use data_directory::{
 pub use lifecycle::Service;
 pub use protocol::{
     CapturedClipboard, Command, CopyFormat, CopyMode, CopyPurpose, DataSizeInfo, Event,
-    FailureKind, LegacyMigrationReport, LegacyMigrationStatus, UpdateStatus,
+    FailureKind, LegacyMigrationReport, LegacyMigrationStatus, ResetApplicationScope, UpdateStatus,
 };
 
 #[cfg(test)]

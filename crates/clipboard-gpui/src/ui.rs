@@ -95,7 +95,8 @@ use file_cards::{FileCardInfo, image_file_dimensions, image_file_record, single_
 use navigation::{history_row_height, history_top_row, show_history_scroll_to_top};
 use presentation::{
     SettingsDangerDialog, apply_theme, dialog_copy, dialog_footer, dialog_shell, dialog_title,
-    format_bytes, localize_service_message, open_settings_danger_dialog, tr, window_shell,
+    format_bytes, localize_service_message, open_reset_application_dialog,
+    open_settings_danger_dialog, tr, window_shell,
 };
 use shortcut_labels::{
     hotkey_label, paste_registration_summary, shortcut_binding_display, shortcut_from_keystroke,
@@ -146,7 +147,7 @@ use clipboard_platform::outside_click::OutsideClickMonitor;
 use clipboard_platform::source_app::RunningApp;
 use clipboard_platform::{
     Command, CopyFormat, CopyMode, CopyPurpose, DataSizeInfo, Event, FailureKind,
-    LegacyMigrationStatus, ReleaseInfo, Service, UpdateStatus,
+    LegacyMigrationStatus, ReleaseInfo, ResetApplicationScope, Service, UpdateStatus,
 };
 use gpui_kit::component::alert::Alert;
 use gpui_kit::component::dialog::DialogFooter;

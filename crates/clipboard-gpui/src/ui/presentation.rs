@@ -195,6 +195,170 @@ pub(super) fn open_settings_danger_dialog(
     });
 }
 
+fn reset_scope_checkbox(
+    id: &'static str,
+    label: &'static str,
+    checked: bool,
+    pending: bool,
+    scope: Rc<std::cell::Cell<ResetApplicationScope>>,
+    set: impl Fn(&mut ResetApplicationScope, bool) + 'static,
+) -> gpui_kit::component::checkbox::Checkbox {
+    use gpui_kit::component::checkbox::Checkbox;
+    Checkbox::new(id)
+        .label(label)
+        .checked(checked)
+        .disabled(pending)
+        .on_change(move |checked, window, _cx| {
+            let mut next = scope.get();
+            set(&mut next, *checked);
+            scope.set(next);
+            window.refresh();
+        })
+}
+
+/// 重置应用：勾选范围。默认勾选设置+保存位置；历史默认不勾。
+pub(super) fn open_reset_application_dialog(
+    window: &mut Window,
+    cx: &mut App,
+    owner: WeakEntity<ClipboardView>,
+    language: LanguagePreference,
+) {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let _ = owner.update(cx, |view, cx| {
+        view.reset_settings_error = None;
+        cx.notify();
+    });
+    let scope = Rc::new(Cell::new(ResetApplicationScope::recommended()));
+    window.open_dialog(cx, move |shell, _, cx| {
+        let (pending, error) = owner
+            .upgrade()
+            .map(|entity| {
+                let view = entity.read(cx);
+                (view.reset_settings_pending, view.reset_settings_error.clone())
+            })
+            .unwrap_or((false, None));
+        let current = scope.get();
+        let confirm = {
+            let owner = owner.clone();
+            let scope = scope.clone();
+            move |window: &mut Window, cx: &mut App| {
+                if owner
+                    .upgrade()
+                    .is_some_and(|entity| entity.read(cx).reset_settings_pending)
+                {
+                    return;
+                }
+                let chosen = scope.get();
+                if !chosen.any() {
+                    let _ = owner.update(cx, |view, cx| {
+                        view.reset_settings_error = Some(
+                            tr(view.language, "请至少勾选一项", "Select at least one item").into(),
+                        );
+                        cx.notify();
+                    });
+                    window.refresh();
+                    return;
+                }
+                let _ = owner.update(cx, |view, cx| view.confirm_reset_application(chosen, cx));
+                window.refresh();
+            }
+        };
+        let confirm_ok = confirm.clone();
+        let cancel_owner = owner.clone();
+
+        let confirm_label = if pending {
+            tr(language, "正在重置", "Resetting")
+        } else if current.needs_restart() {
+            tr(language, "重置并重启", "Reset and restart")
+        } else {
+            tr(language, "重置", "Reset")
+        };
+        dialog_shell(shell, cx)
+            .title(dialog_title(
+                tr(language, "重置应用？", "Reset the app?"),
+                cx,
+            ))
+            .on_ok(move |_, window, cx| {
+                confirm_ok(window, cx);
+                false
+            })
+            .on_cancel(move |_, _, cx| {
+                cancel_owner
+                    .upgrade()
+                    .is_none_or(|entity| !entity.read(cx).reset_settings_pending)
+            })
+            .child(
+                dialog_copy()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(tr(
+                        language,
+                        "勾选要恢复的范围。历史默认不勾，勾选后不可恢复。",
+                        "Choose what to restore. History is off by default and cannot be undone once selected.",
+                    ))
+                    .child(reset_scope_checkbox(
+                        "reset-scope-settings",
+                        tr(
+                            language,
+                            "应用设置（主题、热键、粘贴、采集等）",
+                            "App settings (theme, hotkeys, paste, capture, …)",
+                        ),
+                        current.settings,
+                        pending,
+                        scope.clone(),
+                        |scope, checked| scope.settings = checked,
+                    ))
+                    .child(reset_scope_checkbox(
+                        "reset-scope-location",
+                        tr(
+                            language,
+                            "保存位置（迁回默认数据目录）",
+                            "Save location (move back to the default data folder)",
+                        ),
+                        current.data_location,
+                        pending,
+                        scope.clone(),
+                        |scope, checked| scope.data_location = checked,
+                    ))
+                    .child(reset_scope_checkbox(
+                        "reset-scope-history",
+                        tr(
+                            language,
+                            "剪贴板历史与媒体（不可恢复）",
+                            "Clipboard history and media (cannot be undone)",
+                        ),
+                        current.history,
+                        pending,
+                        scope.clone(),
+                        |scope, checked| scope.history = checked,
+                    ))
+                    .when_some(error, |content, error| {
+                        content.child(Alert::error("reset-settings-error", error).small())
+                    }),
+            )
+            .footer(
+                dialog_footer(cx)
+                    .child(
+                        Button::new("reset-settings-cancel")
+                            .outline()
+                            .label(tr(language, "取消", "Cancel"))
+                            .disabled(pending)
+                            .on_click(|_, window, cx| window.close_dialog(cx)),
+                    )
+                    .child(
+                        Button::new("reset-settings-confirm")
+                            .danger()
+                            .loading(pending)
+                            .label(confirm_label)
+                            .on_click(move |_, window, cx| confirm(window, cx)),
+                    ),
+            )
+    });
+}
+
 pub(super) fn tr(
     language: LanguagePreference,
     chinese: &'static str,

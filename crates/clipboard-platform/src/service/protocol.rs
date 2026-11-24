@@ -61,6 +61,38 @@ impl CopyPurpose {
     }
 }
 
+/// 重置应用弹窗勾选项。默认勾选设置与保存位置，历史需用户显式勾选。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResetApplicationScope {
+    pub settings: bool,
+    pub data_location: bool,
+    pub history: bool,
+}
+
+impl Default for ResetApplicationScope {
+    fn default() -> Self {
+        Self::recommended()
+    }
+}
+
+impl ResetApplicationScope {
+    pub const fn recommended() -> Self {
+        Self {
+            settings: true,
+            data_location: true,
+            history: false,
+        }
+    }
+
+    pub const fn any(self) -> bool {
+        self.settings || self.data_location || self.history
+    }
+
+    pub const fn needs_restart(self) -> bool {
+        self.settings || self.data_location
+    }
+}
+
 pub enum Command {
     Query {
         search: String,
@@ -229,7 +261,8 @@ pub enum Command {
     QueryDataSize,
     QueryDailyCounts(String),
     OptimizeDatabase,
-    ResetApplicationSettings,
+    /// 按勾选范围重置：设置 / 保存位置 / 历史。
+    ResetApplication(ResetApplicationScope),
     OpenDataDirectory,
     ExportBackup(PathBuf),
     Reorder {
@@ -371,7 +404,7 @@ impl Command {
             Self::QueryDataSize => Some(FailureKind::DataSize),
             Self::QueryDailyCounts(_) => Some(FailureKind::Other),
             Self::OptimizeDatabase => Some(FailureKind::DatabaseMaintenance),
-            Self::ResetApplicationSettings => Some(FailureKind::ResetSettings),
+            Self::ResetApplication(_) => Some(FailureKind::ResetSettings),
             Self::CheckUpdate | Self::DownloadUpdate(_) | Self::InstallUpdate(_) => {
                 Some(FailureKind::Update)
             }
@@ -501,7 +534,7 @@ pub enum Event {
     DataSize(Result<DataSizeInfo, String>),
     DailyCounts(Result<Vec<(String, i64)>, String>),
     DatabaseOptimized(DataSizeInfo),
-    ApplicationSettingsReset(Result<(), String>),
+    ApplicationSettingsReset(Result<ResetApplicationScope, String>),
     BackupExported(Result<BackupReport, String>),
     BackgroundError(String),
     CommandFailed {

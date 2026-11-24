@@ -204,12 +204,22 @@ impl ClipboardView {
         true
     }
 
-    pub(super) fn confirm_reset_settings(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn confirm_reset_application(
+        &mut self,
+        scope: ResetApplicationScope,
+        cx: &mut Context<Self>,
+    ) {
         if self.reset_settings_pending || self.data_import_phase.is_some() {
             return;
         }
+        if !scope.any() {
+            self.reset_settings_error =
+                Some(tr(self.language, "请至少勾选一项", "Select at least one item").into());
+            cx.notify();
+            return;
+        }
         self.reset_settings_error = None;
-        if self.send(Command::ResetApplicationSettings, cx) {
+        if self.send(Command::ResetApplication(scope), cx) {
             self.reset_settings_pending = true;
         } else {
             self.reset_settings_error = Some(self.message.clone());

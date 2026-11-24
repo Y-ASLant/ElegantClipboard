@@ -12,50 +12,6 @@ impl SettingsWindowView {
         let data_size_pending = owner_state.data_size_pending;
         let maintenance_pending = owner_state.database_maintenance_pending;
         let export_pending = owner_state.export_pending;
-        let data_size_detail = data_size.map_or_else(
-            || {
-                tr(
-                    language,
-                    "尚未统计数据占用",
-                    "Usage has not been calculated",
-                )
-                .to_owned()
-            },
-            |size| {
-                let detail = if language == LanguagePreference::English {
-                    format!(
-                        "Total {} · Database {} · Images {} / {}",
-                        format_bytes(size.total_bytes),
-                        format_bytes(size.database_bytes),
-                        size.image_count,
-                        format_bytes(size.image_bytes)
-                    )
-                } else {
-                    format!(
-                        "共 {} · 数据库 {} · 图片 {} 个 / {}",
-                        format_bytes(size.total_bytes),
-                        format_bytes(size.database_bytes),
-                        size.image_count,
-                        format_bytes(size.image_bytes)
-                    )
-                };
-                if size.staged_count == 0 && size.staged_bytes == 0 {
-                    detail
-                } else if language == LanguagePreference::English {
-                    format!(
-                        "{detail} · Legacy file copies pending cleanup {} / {}",
-                        size.staged_count,
-                        format_bytes(size.staged_bytes)
-                    )
-                } else {
-                    format!(
-                        "{detail} · 待清理旧文件副本 {} 个 / {}",
-                        size.staged_count,
-                        format_bytes(size.staged_bytes)
-                    )
-                }
-            },
-        );
         let refresh_owner = self.owner.clone();
         let optimize_owner = self.owner.clone();
         let folder_owner = self.owner.clone();
@@ -70,6 +26,14 @@ impl SettingsWindowView {
             || maintenance_pending;
 
         settings_stack()
+            .child(self.data_stats_card(
+                language,
+                data_size.as_ref(),
+                data_size_pending,
+                maintenance_pending,
+                refresh_owner,
+                cx,
+            ))
             .child(
                 settings_inline()
                     .items_center()
@@ -113,85 +77,161 @@ impl SettingsWindowView {
             .child(
                 settings_inline()
                     .child(
-                        settings_description(data_size_detail, cx)
-                            .w_auto()
-                            .flex_basis(px(360.))
-                            .flex_grow(1.),
+                        Button::new("settings-window-optimize")
+                            .outline()
+                            .icon(IconName::HardDrive)
+                            .h(px(visual::CONTROL_HEIGHT_LARGE))
+                            .label(tr(language, "整理", "Optimize"))
+                            .accessibility_label(tr(language, "整理数据库", "Optimize database"))
+                            .disabled(data_size_pending || maintenance_pending)
+                            .on_click(move |_, _, cx| {
+                                let _ = optimize_owner.update(cx, |owner, cx| {
+                                    if owner.send(Command::OptimizeDatabase, cx) {
+                                        owner.database_maintenance_pending = true;
+                                        cx.notify();
+                                    }
+                                });
+                            }),
                     )
                     .child(
-                        settings_inline()
-                            .w_auto()
-                            .child(
-                                Button::new("settings-window-refresh")
-                                    .outline()
-                                    .icon(IconName::RotateCw)
-                                    .h(px(visual::CONTROL_HEIGHT_LARGE))
-                                    .label(tr(language, "刷新", "Refresh"))
-                                    .accessibility_label(tr(language, "刷新占用", "Refresh usage"))
-                                    .disabled(data_size_pending || maintenance_pending)
-                                    .on_click(move |_, _, cx| {
-                                        let _ = refresh_owner.update(cx, |owner, cx| {
-                                            owner.refresh_data_size(cx);
-                                            owner.refresh_daily_counts(cx);
-                                        });
-                                    }),
-                            )
-                            .child(
-                                Button::new("settings-window-optimize")
-                                    .outline()
-                                    .icon(IconName::HardDrive)
-                                    .h(px(visual::CONTROL_HEIGHT_LARGE))
-                                    .label(tr(language, "整理", "Optimize"))
-                                    .accessibility_label(tr(
-                                        language,
-                                        "整理数据库",
-                                        "Optimize database",
-                                    ))
-                                    .disabled(data_size_pending || maintenance_pending)
-                                    .on_click(move |_, _, cx| {
-                                        let _ = optimize_owner.update(cx, |owner, cx| {
-                                            if owner.send(Command::OptimizeDatabase, cx) {
-                                                owner.database_maintenance_pending = true;
-                                                cx.notify();
-                                            }
-                                        });
-                                    }),
-                            )
-                            .child(
-                                Button::new("settings-window-folder")
-                                    .outline()
-                                    .icon(IconName::FolderOpen)
-                                    .h(px(visual::CONTROL_HEIGHT_LARGE))
-                                    .label(tr(language, "打开目录", "Open folder"))
-                                    .accessibility_label(tr(
-                                        language,
-                                        "打开数据目录",
-                                        "Open data folder",
-                                    ))
-                                    .on_click(move |_, _, cx| {
-                                        let _ = folder_owner.update(cx, |owner, cx| {
-                                            owner.send(Command::OpenDataDirectory, cx);
-                                        });
-                                    }),
-                            )
-                            .child(
-                                Button::new("settings-window-export")
-                                    .outline()
-                                    .icon(IconName::ExternalLink)
-                                    .h(px(visual::CONTROL_HEIGHT_LARGE))
-                                    .label(tr(language, "导出备份", "Export backup"))
-                                    .accessibility_label(tr(language, "导出备份", "Export backup"))
-                                    .disabled(export_pending)
-                                    .on_click(move |_, _, cx| {
-                                        let _ = export_owner.update(cx, |owner, cx| {
-                                            owner.start_export(cx);
-                                        });
-                                    }),
-                            )
-                            .child(self.clear_all_history_button(language, clear_all_pending)),
-                    ),
+                        Button::new("settings-window-folder")
+                            .outline()
+                            .icon(IconName::FolderOpen)
+                            .h(px(visual::CONTROL_HEIGHT_LARGE))
+                            .label(tr(language, "打开目录", "Open folder"))
+                            .accessibility_label(tr(language, "打开数据目录", "Open data folder"))
+                            .on_click(move |_, _, cx| {
+                                let _ = folder_owner.update(cx, |owner, cx| {
+                                    owner.send(Command::OpenDataDirectory, cx);
+                                });
+                            }),
+                    )
+                    .child(
+                        Button::new("settings-window-export")
+                            .outline()
+                            .icon(IconName::ExternalLink)
+                            .h(px(visual::CONTROL_HEIGHT_LARGE))
+                            .label(tr(language, "导出备份", "Export backup"))
+                            .accessibility_label(tr(language, "导出备份", "Export backup"))
+                            .disabled(export_pending)
+                            .on_click(move |_, _, cx| {
+                                let _ = export_owner.update(cx, |owner, cx| {
+                                    owner.start_export(cx);
+                                });
+                            }),
+                    )
+                    .child(self.clear_all_history_button(language, clear_all_pending)),
             )
             .into_any_element()
+    }
+
+    /// 数据占用：节内已有 GroupBox，不再套卡片；用 DescriptionList 三列。
+    fn data_stats_card(
+        &self,
+        language: LanguagePreference,
+        data_size: Option<&DataSizeInfo>,
+        data_size_pending: bool,
+        maintenance_pending: bool,
+        refresh_owner: WeakEntity<ClipboardView>,
+        cx: &App,
+    ) -> Div {
+        use gpui_kit::component::Sizable as _;
+        use gpui_kit::component::description_list::DescriptionList;
+
+        let header = div()
+            .w_full()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(px(visual::SPACE_2))
+            .child(
+                div()
+                    .font_medium()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(tr(language, "数据占用", "Data usage")),
+            )
+            .child(
+                Button::new("settings-window-refresh")
+                    .ghost()
+                    .icon(IconName::RotateCw)
+                    .xsmall()
+                    .tooltip(tr(language, "刷新占用", "Refresh usage"))
+                    .accessibility_label(tr(language, "刷新占用", "Refresh usage"))
+                    .disabled(data_size_pending || maintenance_pending)
+                    .loading(data_size_pending)
+                    .on_click(move |_, _, cx| {
+                        let _ = refresh_owner.update(cx, |owner, cx| {
+                            owner.refresh_data_size(cx);
+                            owner.refresh_daily_counts(cx);
+                        });
+                    }),
+            );
+
+        let body: AnyElement = match data_size {
+            Some(size) => {
+                let images_value = format!(
+                    "{} · {}{}",
+                    format_bytes(size.image_bytes),
+                    size.image_count,
+                    if language == LanguagePreference::English {
+                        ""
+                    } else {
+                        " 个"
+                    }
+                );
+                let mut list = DescriptionList::vertical()
+                    .columns(3)
+                    .bordered(false)
+                    .small()
+                    .item(
+                        tr(language, "总计", "Total"),
+                        format_bytes(size.total_bytes),
+                        1,
+                    )
+                    .item(
+                        tr(language, "数据库", "Database"),
+                        format_bytes(size.database_bytes),
+                        1,
+                    )
+                    .item(tr(language, "图片", "Images"), images_value, 1);
+                if size.staged_count > 0 || size.staged_bytes > 0 {
+                    let staged = if language == LanguagePreference::English {
+                        format!(
+                            "Legacy copies {} / {}",
+                            size.staged_count,
+                            format_bytes(size.staged_bytes)
+                        )
+                    } else {
+                        format!(
+                            "待清理旧副本 {} 个 / {}",
+                            size.staged_count,
+                            format_bytes(size.staged_bytes)
+                        )
+                    };
+                    list =
+                        list.separator()
+                            .item(tr(language, "待清理", "Pending cleanup"), staged, 3);
+                }
+                list.into_any_element()
+            }
+            None => div()
+                .text_size(px(visual::TEXT_SMALL))
+                .text_color(cx.theme().muted_foreground)
+                .child(tr(
+                    language,
+                    "尚未统计，点右侧刷新",
+                    "Not calculated yet — tap refresh",
+                ))
+                .into_any_element(),
+        };
+
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(px(visual::SPACE_2))
+            .child(header)
+            .child(body)
     }
 
     /// 导入/恢复共用进度面：选路径与写入阶段同一套结构，文案按来源区分。
@@ -345,38 +385,12 @@ impl SettingsWindowView {
             .label(tr(language, "重置应用", "Reset app"))
             .tooltip(tr(
                 language,
-                "恢复默认设置与默认保存位置，保留剪贴板历史",
-                "Restore default settings and save location; keep clipboard history",
+                "按项恢复默认；默认可勾选设置与保存位置",
+                "Restore defaults by item; settings and save location are checked by default",
             ))
             .disabled(reset_pending || import_pending)
             .on_click(move |_, window, cx| {
-                open_settings_danger_dialog(
-                    window,
-                    cx,
-                    owner.clone(),
-                    SettingsDangerDialog {
-                        title: tr(language, "重置应用设置？", "Reset app settings?"),
-                        body: tr(
-                            language,
-                            "主题、热键、粘贴与采集等设置将恢复默认；自定义保存位置也会改回默认目录。",
-                            "Theme, hotkeys, paste, and capture settings return to defaults. A custom save location moves back to the default folder.",
-                        ),
-                        detail: tr(
-                            language,
-                            "剪贴板历史、分组与图片会随数据一并保留并迁回默认位置。完成后应用会自动重启。",
-                            "Clipboard history, groups, and images are kept and moved to the default location. The app restarts when done.",
-                        ),
-                        cancel_id: "reset-settings-cancel",
-                        confirm_id: "reset-settings-confirm",
-                        error_id: "reset-settings-error",
-                        cancel_label: tr(language, "取消", "Cancel"),
-                        confirm_label: tr(language, "重置并重启", "Reset and restart"),
-                        pending_label: tr(language, "正在重置", "Resetting"),
-                    },
-                    |view| view.reset_settings_error = None,
-                    |view| (view.reset_settings_pending, view.reset_settings_error.clone()),
-                    |view, cx| view.confirm_reset_settings(cx),
-                );
+                open_reset_application_dialog(window, cx, owner.clone(), language);
             })
     }
 

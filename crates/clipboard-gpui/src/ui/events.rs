@@ -290,19 +290,33 @@ impl ClipboardView {
             Event::ApplicationSettingsReset(result) => {
                 self.reset_settings_pending = false;
                 match result {
-                    Ok(()) => {
+                    Ok(scope) => {
                         self.reset_settings_error = None;
-                        // 可能已排队迁回默认目录：勿再绑定旧 DATA_DIR。
-                        if self.prepare_app_exit(cx) {
-                            self.close_editor(window, cx);
-                            self.restart_into_data_dir(Some(false), cx);
+                        if scope.needs_restart() {
+                            // 可能已排队迁回默认目录：勿再绑定旧 DATA_DIR。
+                            if self.prepare_app_exit(cx) {
+                                self.close_editor(window, cx);
+                                self.restart_into_data_dir(Some(false), cx);
+                            }
+                        } else {
+                            window.close_dialog(cx);
+                            self.refresh_data_size(cx);
+                            self.set_feedback_message(
+                                tr(
+                                    self.language,
+                                    "已按所选范围重置",
+                                    "Reset completed for the selected items",
+                                )
+                                .into(),
+                            );
+                            self.is_error = false;
                         }
                     }
                     Err(error) => {
                         self.reset_settings_error = Some(error.clone());
                         self.set_feedback_message(format!(
                             "{}: {error}",
-                            tr(self.language, "重置设置失败", "Failed to reset settings")
+                            tr(self.language, "重置失败", "Reset failed")
                         ));
                         self.is_error = true;
                     }
