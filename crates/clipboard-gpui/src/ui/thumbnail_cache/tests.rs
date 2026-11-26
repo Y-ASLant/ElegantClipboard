@@ -5,6 +5,33 @@ fn key(path: PathBuf) -> ThumbnailKey {
     ThumbnailKey::new(path, "source-hash".into(), false, (12., 8.), 2.)
 }
 
+fn frame_image(width: u32, height: u32) -> Arc<RenderImage> {
+    Arc::new(RenderImage::new(vec![Frame::new(ImageBuffer::from_pixel(
+        width,
+        height,
+        Rgba([1u8, 2, 3, 255]),
+    ))]))
+}
+
+fn cache_with_budgets(visible: usize, hidden: usize) -> ThumbnailCache {
+    ThumbnailCache {
+        byte_budget: visible,
+        hidden_byte_budget: hidden,
+        ..ThumbnailCache::default()
+    }
+}
+
+fn finish_ready(cache: &mut ThumbnailCache, image: Arc<RenderImage>) {
+    let job = cache.next_job().expect("a decode job is pending");
+    cache.finish(
+        job.token,
+        ThumbnailResult {
+            version: None,
+            image: Some(Thumbnail::Ready(image)),
+        },
+    );
+}
+
 fn ready(result: ThumbnailResult) -> Arc<RenderImage> {
     match result.image.unwrap() {
         Thumbnail::Ready(image) => image,
@@ -44,59 +71,6 @@ fn scales_real_pixels_to_dpi_bounds_preserving_aspect_color_and_alpha() {
         .unwrap();
     let image = decode_thumbnail(&key(path)).unwrap().unwrap();
     assert_eq!((image.size(0).width.0, image.size(0).height.0), (2, 1));
-}
-
-#[test]
-fn evicted_jobs_do_not_refill_cache_or_overwrite_reentered_requests() {
-    let mut cache = ThumbnailCache::default();
-    let first = key("first.png".into());
-    let second = key("second.png".into());
-    cache.retain(vec![first.clone(), second.clone()]);
-    let old = cache.next_job().unwrap();
-    let other = cache.next_job().unwrap();
-    assert!(cache.next_job().is_none());
-    cache.retain(vec![]);
-    cache.retain(vec![first.clone()]);
-    // Eviction does not release a worker slot before its real work has finished.
-    assert!(cache.next_job().is_none());
-    assert!(
-        cache
-            .finish(
-                other.token,
-                ThumbnailResult {
-                    version: None,
-                    image: Some(Thumbnail::Original)
-                }
-            )
-            .is_none()
-    );
-    let current = cache.next_job().unwrap();
-    assert!(
-        cache
-            .finish(
-                old.token,
-                ThumbnailResult {
-                    version: None,
-                    image: Some(Thumbnail::Original)
-                }
-            )
-            .is_none()
-    );
-    assert!(cache.source(&first).is_none());
-    assert_eq!(
-        cache.finish(
-            current.token,
-            ThumbnailResult {
-                version: None,
-                image: Some(Thumbnail::Original)
-            }
-        ),
-        Some(first.path.clone())
-    );
-    assert!(matches!(
-        cache.source(&first),
-        Some(ImageSource::Resource(_))
-    ));
 }
 
 #[test]
@@ -281,25 +255,86 @@ fn animated_formats_fall_back_by_content_even_with_wrong_extension() {
 }
 
 #[test]
-fn drag_arc_keeps_pixels_until_snapshot_releases_them() {
+fn warm_entries_survive_scope_switches_without_redecoding() {
     let mut cache = ThumbnailCache::default();
-    let source = key("drag.png".into());
-    cache.retain(vec![source.clone()]);
-    let job = cache.next_job().unwrap();
-    let image = Arc::new(RenderImage::new(vec![Frame::new(ImageBuffer::from_pixel(
-        1,
-        1,
-        Rgba([1u8, 2, 3, 255]),
-    ))]));
-    cache.finish(
-        job.token,
-        ThumbnailResult {
-            version: None,
-            image: Some(Thumbnail::Ready(image.clone())),
-        },
+    let source = key("warm.png".into());
+    cache.retain([source.clone()]);
+    finish_ready(&mut cache, frame_image(2, 2));
+    // Leaving the visible scope cools the entry instead of dropping it.
+    cache.retain([]);
+    assert!(cache.source(&source).is_some());
+    // Coming back reuses the pixels: no decode job is queued again.
+    cache.retain([source.clone()]);
+    assert!(cache.next_job().is_none());
+    assert!(matches!(
+        cache.source(&source),
+        Some(ImageSource::Render(_))
+    ));
+}
+
+#[test]
+fn budget_pressure_evicts_coldest_first_and_wanted_entries_are_immune() {
+    let mut cache = cache_with_budgets(96, HIDDEN_BYTE_BUDGET);
+    let (first, second) = (key("first.png".into()), key("second.png".into()));
+    // Declare both rows visible before their decodes land, like a real frame.
+    cache.retain([first.clone(), second.clone()]);
+    finish_ready(&mut cache, frame_image(4, 4));
+    finish_ready(&mut cache, frame_image(4, 4));
+    // 128 bytes over a 96 byte budget, but both entries are wanted: no eviction.
+    assert!(cache.source(&first).is_some());
+    assert!(cache.source(&second).is_some());
+    // Once out of scope, the coldest entry goes first.
+    cache.retain([key("third.png".into())]);
+    assert!(cache.source(&first).is_none());
+    assert!(cache.source(&second).is_some());
+}
+
+#[test]
+fn entry_count_cap_evicts_zero_byte_results() {
+    let mut cache = ThumbnailCache::default();
+    for index in 0..=MAX_ENTRIES {
+        let entry_key = key(format!("entry-{index}.png").into());
+        cache.retain([entry_key]);
+        let job = cache.next_job().unwrap();
+        cache.finish(
+            job.token,
+            ThumbnailResult {
+                version: None,
+                image: Some(Thumbnail::Original),
+            },
+        );
+    }
+    assert_eq!(cache.entries.len(), MAX_ENTRIES);
+    assert!(!cache.entries.contains_key(&key("entry-0.png".into())));
+    assert!(
+        cache
+            .entries
+            .contains_key(&key(format!("entry-{MAX_ENTRIES}.png").into()))
     );
+}
+
+#[test]
+fn release_for_hidden_drops_immunity_and_shrinks_to_the_hidden_budget() {
+    let mut cache = cache_with_budgets(BYTE_BUDGET, 64);
+    let (first, second) = (key("first.png".into()), key("second.png".into()));
+    cache.retain([first.clone()]);
+    finish_ready(&mut cache, frame_image(4, 4));
+    cache.retain([second.clone()]);
+    finish_ready(&mut cache, frame_image(4, 4));
+    cache.retain([first.clone(), second.clone()]);
+    cache.release_for_hidden();
+    assert!(cache.source(&first).is_none());
+    assert!(cache.source(&second).is_some());
+}
+
+#[test]
+fn drag_arc_keeps_pixels_until_snapshot_releases_them() {
+    // A zero budget evicts any decoded entry as soon as it leaves the scope.
+    let mut cache = cache_with_budgets(0, HIDDEN_BYTE_BUDGET);
+    let source = key("drag.png".into());
+    cache.retain([source.clone()]);
+    finish_ready(&mut cache, frame_image(1, 1));
     let snapshot = cache.source(&source).unwrap();
-    drop(image);
     cache.retain(vec![]);
     assert!(cache.released_images().is_empty());
     let ImageSource::Render(drag_image) = &snapshot else {

@@ -189,10 +189,10 @@ impl ClipboardView {
             cx.background_executor().timer(IMAGE_RELEASE_DELAY).await;
             let _ = view.update(cx, |this, cx| {
                 for path in std::mem::take(&mut this.rendered_images) {
-                    ImageSource::from(path).remove_asset(cx);
+                    ImageSource::from(path.clone()).remove_asset(cx);
                 }
                 this.image_visible_range = 0..0;
-                this.thumbnails.retain(Vec::new());
+                this.thumbnails.release_for_hidden();
             });
         }));
     }

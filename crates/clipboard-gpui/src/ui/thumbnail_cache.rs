@@ -13,6 +13,12 @@ use std::{
 const MAX_CONCURRENT: usize = 2;
 const MAX_DECODE_BYTES: u64 = 128 * 1024 * 1024;
 const FILE_RECHECK: Duration = Duration::from_secs(5);
+/// Decoded bitmaps stay resident while visible, then cool down instead of being
+/// dropped: switching groups or scrolling back reuses them at zero cost.
+const BYTE_BUDGET: usize = 24 * 1024 * 1024;
+const HIDDEN_BYTE_BUDGET: usize = 4 * 1024 * 1024;
+/// Caps entries whose result occupies no decoded pixels (`Original`/`Failed`).
+const MAX_ENTRIES: usize = 512;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(super) struct ThumbnailKey {
@@ -70,6 +76,9 @@ struct Entry {
     result: Option<Thumbnail>,
     version: Option<FileVersion>,
     checked: Instant,
+    /// Decoded pixel bytes, counted only for `Ready` results.
+    bytes: usize,
+    last_used: u64,
 }
 
 pub(super) struct ThumbnailJob {
@@ -83,7 +92,6 @@ pub(super) struct ThumbnailResult {
     image: Option<Thumbnail>,
 }
 
-#[derive(Default)]
 pub(super) struct ThumbnailCache {
     // Keep the first visible position without duplicating keys in an ordered collection.
     wanted: HashMap<ThumbnailKey, usize>,
@@ -92,26 +100,83 @@ pub(super) struct ThumbnailCache {
     next_token: u64,
     // A drag snapshot can outlive its row. Delay atlas removal until it releases its Arc.
     retired: Vec<Arc<RenderImage>>,
+    bytes: usize,
+    clock: u64,
+    byte_budget: usize,
+    hidden_byte_budget: usize,
+}
+
+impl Default for ThumbnailCache {
+    fn default() -> Self {
+        Self {
+            wanted: HashMap::new(),
+            entries: HashMap::new(),
+            running: HashMap::new(),
+            next_token: 0,
+            retired: Vec::new(),
+            bytes: 0,
+            clock: 0,
+            byte_budget: BYTE_BUDGET,
+            hidden_byte_budget: HIDDEN_BYTE_BUDGET,
+        }
+    }
+}
+
+fn byte_len(image: &RenderImage) -> usize {
+    let size = image.size(0);
+    usize::try_from(size.width.0).unwrap_or(0)
+        * usize::try_from(size.height.0).unwrap_or(0)
+        * 4
+        * image.frame_count()
 }
 
 impl ThumbnailCache {
+    /// Refresh the visible priority set and touch every matching entry. Entries
+    /// leaving the visible scope stay resident until budget pressure evicts the
+    /// coldest ones, so switching groups and coming back costs nothing.
     pub fn retain<I>(&mut self, wanted: I)
     where
         I: IntoIterator<Item = ThumbnailKey>,
     {
         self.wanted.clear();
         for (position, key) in wanted.into_iter().enumerate() {
-            self.wanted.entry(key).or_insert(position);
-        }
-        self.entries.retain(|key, entry| {
-            if self.wanted.contains_key(key) {
-                return true;
+            self.wanted.entry(key.clone()).or_insert(position);
+            // Advance per key so rows touched within one frame keep their order:
+            // higher rows stay warmer than lower ones.
+            self.clock += 1;
+            if let Some(entry) = self.entries.get_mut(&key) {
+                entry.last_used = self.clock;
             }
-            if let Some(Thumbnail::Ready(image)) = entry.result.take() {
+        }
+        self.evict(self.byte_budget);
+    }
+
+    /// The hidden window keeps only the most recent screenful warm.
+    pub fn release_for_hidden(&mut self) {
+        self.wanted.clear();
+        self.evict(self.hidden_byte_budget);
+    }
+
+    /// Evict the coldest entries beyond `budget` bytes or `MAX_ENTRIES` in total.
+    /// Wanted and in-flight entries are immune: evicting either would re-decode
+    /// work the list is actively waiting for.
+    fn evict(&mut self, budget: usize) {
+        while self.bytes > budget || self.entries.len() > MAX_ENTRIES {
+            let candidate = self
+                .entries
+                .iter()
+                .filter(|(key, entry)| {
+                    !self.wanted.contains_key(*key) && !self.running.contains_key(&entry.token)
+                })
+                .min_by_key(|(_, entry)| entry.last_used)
+                .map(|(key, _)| key.clone());
+            let Some(key) = candidate else { break };
+            let entry = self.entries.remove(&key).expect("eviction candidate");
+            self.bytes = self.bytes.saturating_sub(entry.bytes);
+            if let Some(Thumbnail::Ready(image)) = entry.result {
                 self.retired.push(image);
             }
-            false
-        });
+        }
     }
 
     pub fn source(&self, key: &ThumbnailKey) -> Option<ImageSource> {
@@ -150,6 +215,8 @@ impl ThumbnailCache {
             result: None,
             version: None,
             checked: Instant::now(),
+            bytes: 0,
+            last_used: self.clock,
         });
         entry.token = token;
         self.running.insert(token, key.clone());
@@ -170,9 +237,17 @@ impl ThumbnailCache {
         entry.checked = Instant::now();
         entry.version = result.version;
         if let Some(image) = result.image {
+            let bytes = match &image {
+                Thumbnail::Ready(render) => byte_len(render),
+                _ => 0,
+            };
             if let Some(Thumbnail::Ready(old)) = entry.result.replace(image) {
                 self.retired.push(old);
             }
+            self.bytes = self.bytes + bytes - entry.bytes;
+            entry.bytes = bytes;
+            // Entries inserted since the last `retain` are accounted for here.
+            self.evict(self.byte_budget);
             return Some(key.path);
         }
         None
@@ -191,8 +266,15 @@ impl ThumbnailCache {
         released
     }
 
+    /// View teardown drops everything regardless of budget.
     pub fn drain_images(&mut self) -> Vec<Arc<RenderImage>> {
-        self.retain(Vec::new());
+        self.wanted.clear();
+        self.bytes = 0;
+        for entry in std::mem::take(&mut self.entries).into_values() {
+            if let Some(Thumbnail::Ready(image)) = entry.result {
+                self.retired.push(image);
+            }
+        }
         std::mem::take(&mut self.retired)
     }
 }
