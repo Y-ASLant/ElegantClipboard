@@ -21,15 +21,19 @@ fn cache_with_budgets(visible: usize, hidden: usize) -> ThumbnailCache {
     }
 }
 
-fn finish_ready(cache: &mut ThumbnailCache, image: Arc<RenderImage>) {
+fn finish_result(cache: &mut ThumbnailCache, result: Thumbnail) {
     let job = cache.next_job().expect("a decode job is pending");
     cache.finish(
         job.token,
         ThumbnailResult {
             version: None,
-            image: Some(Thumbnail::Ready(image)),
+            image: Some(result),
         },
     );
+}
+
+fn finish_ready(cache: &mut ThumbnailCache, image: Arc<RenderImage>) {
+    finish_result(cache, Thumbnail::Ready(image));
 }
 
 fn ready(result: ThumbnailResult) -> Arc<RenderImage> {
@@ -293,16 +297,8 @@ fn budget_pressure_evicts_coldest_first_and_wanted_entries_are_immune() {
 fn entry_count_cap_evicts_zero_byte_results() {
     let mut cache = ThumbnailCache::default();
     for index in 0..=MAX_ENTRIES {
-        let entry_key = key(format!("entry-{index}.png").into());
-        cache.retain([entry_key]);
-        let job = cache.next_job().unwrap();
-        cache.finish(
-            job.token,
-            ThumbnailResult {
-                version: None,
-                image: Some(Thumbnail::Original),
-            },
-        );
+        cache.retain([key(format!("entry-{index}.png").into())]);
+        finish_result(&mut cache, Thumbnail::Original);
     }
     assert_eq!(cache.entries.len(), MAX_ENTRIES);
     assert!(!cache.entries.contains_key(&key("entry-0.png".into())));
@@ -335,7 +331,7 @@ fn drag_arc_keeps_pixels_until_snapshot_releases_them() {
     cache.retain([source.clone()]);
     finish_ready(&mut cache, frame_image(1, 1));
     let snapshot = cache.source(&source).unwrap();
-    cache.retain(vec![]);
+    cache.retain([]);
     assert!(cache.released_images().is_empty());
     let ImageSource::Render(drag_image) = &snapshot else {
         panic!("render image")
