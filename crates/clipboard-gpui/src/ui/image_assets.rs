@@ -116,7 +116,11 @@ impl ClipboardView {
                 pinned.push(path);
             }
         }
-        let needed = retained_image_paths(rows, pinned);
+        // Rows for animated formats render the original file: keep its decoded
+        // asset in GPUI's cache as long as the thumbnail entry is resident,
+        // or every scroll past the row forces a full reload.
+        let mut needed = retained_image_paths(rows, pinned);
+        needed.extend(self.thumbnails.original_paths());
         for path in self.rendered_images.difference(&needed) {
             ImageSource::from(path.clone()).remove_asset(cx);
         }
@@ -149,9 +153,11 @@ impl ClipboardView {
             cx.spawn(async move |view, cx| {
                 let result = task.await;
                 let _ = view.update(cx, |this, cx| {
-                    if let Some(path) = this.thumbnails.finish(token, result) {
-                        // Also invalidate the original-path fallback after external file changes.
-                        ImageSource::from(path).remove_asset(cx);
+                    if let Some((path, invalidate)) = this.thumbnails.finish(token, result) {
+                        // Invalidate the original-path asset only when the file changed.
+                        if invalidate {
+                            ImageSource::from(path).remove_asset(cx);
+                        }
                         cx.notify();
                     }
                     this.start_thumbnail_jobs(cx);

@@ -4,7 +4,7 @@ mod tests;
 use gpui_kit::{ImageCacheError, ImageSource, RenderImage};
 use image::{DynamicImage, Frame, ImageDecoder, ImageFormat, ImageReader};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::PathBuf,
     sync::Arc,
     time::{Duration, Instant, SystemTime},
@@ -183,6 +183,16 @@ impl ThumbnailCache {
         }
     }
 
+    /// Paths whose rows render the original file directly (animated formats),
+    /// so the decoded asset must stay in GPUI's cache while the entry lives.
+    pub fn original_paths(&self) -> HashSet<PathBuf> {
+        self.entries
+            .iter()
+            .filter(|(_, entry)| matches!(entry.result, Some(Thumbnail::Original)))
+            .map(|(key, _)| key.path.clone())
+            .collect()
+    }
+
     pub fn source(&self, key: &ThumbnailKey) -> Option<ImageSource> {
         self.entries
             .get(key)
@@ -231,7 +241,7 @@ impl ThumbnailCache {
         })
     }
 
-    pub fn finish(&mut self, token: u64, result: ThumbnailResult) -> Option<PathBuf> {
+    pub fn finish(&mut self, token: u64, result: ThumbnailResult) -> Option<(PathBuf, bool)> {
         let key = self.running.remove(&token)?;
         // Eviction and re-entry can queue another request for the very same key.
         let entry = self
@@ -245,6 +255,10 @@ impl ThumbnailCache {
             Thumbnail::Ready(render) => byte_len(render),
             _ => 0,
         };
+        // Replacing an existing result means the file changed: the caller must
+        // invalidate the original-path asset so rows re-read it. A first fill
+        // must not, or it would discard previews already rendering that path.
+        let invalidate = entry.result.is_some();
         if let Some(Thumbnail::Ready(old)) = entry.result.replace(image) {
             self.retired.push(old);
         }
@@ -252,7 +266,7 @@ impl ThumbnailCache {
         entry.bytes = bytes;
         // Entries inserted since the last `retain` are accounted for here.
         self.evict(self.byte_budget);
-        Some(key.path)
+        Some((key.path, invalidate))
     }
 
     pub fn released_images(&mut self) -> Vec<Arc<RenderImage>> {
