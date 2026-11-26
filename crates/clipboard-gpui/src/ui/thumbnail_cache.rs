@@ -168,10 +168,14 @@ impl ThumbnailCache {
                 .filter(|(key, entry)| {
                     !self.wanted.contains_key(*key) && !self.running.contains_key(&entry.token)
                 })
-                .min_by_key(|(_, entry)| entry.last_used)
+                // Tokens increase monotonically per job, so they order entries
+                // created within a single frame whose `last_used` ties.
+                .min_by_key(|(_, entry)| (entry.last_used, entry.token))
                 .map(|(key, _)| key.clone());
             let Some(key) = candidate else { break };
-            let entry = self.entries.remove(&key).expect("eviction candidate");
+            let Some(entry) = self.entries.remove(&key) else {
+                break;
+            };
             self.bytes = self.bytes.saturating_sub(entry.bytes);
             if let Some(Thumbnail::Ready(image)) = entry.result {
                 self.retired.push(image);
@@ -236,21 +240,19 @@ impl ThumbnailCache {
             .filter(|entry| entry.token == token)?;
         entry.checked = Instant::now();
         entry.version = result.version;
-        if let Some(image) = result.image {
-            let bytes = match &image {
-                Thumbnail::Ready(render) => byte_len(render),
-                _ => 0,
-            };
-            if let Some(Thumbnail::Ready(old)) = entry.result.replace(image) {
-                self.retired.push(old);
-            }
-            self.bytes = self.bytes + bytes - entry.bytes;
-            entry.bytes = bytes;
-            // Entries inserted since the last `retain` are accounted for here.
-            self.evict(self.byte_budget);
-            return Some(key.path);
+        let image = result.image?;
+        let bytes = match &image {
+            Thumbnail::Ready(render) => byte_len(render),
+            _ => 0,
+        };
+        if let Some(Thumbnail::Ready(old)) = entry.result.replace(image) {
+            self.retired.push(old);
         }
-        None
+        self.bytes = self.bytes.saturating_add(bytes) - entry.bytes;
+        entry.bytes = bytes;
+        // Entries inserted since the last `retain` are accounted for here.
+        self.evict(self.byte_budget);
+        Some(key.path)
     }
 
     pub fn released_images(&mut self) -> Vec<Arc<RenderImage>> {
