@@ -17,6 +17,7 @@ pub(super) struct ContentEditorWindow {
     _owner_subscription: Subscription,
     _owner_release_subscription: Subscription,
     _editor_subscription: Subscription,
+    _activation: Subscription,
 }
 
 impl ContentEditorWindow {
@@ -42,6 +43,30 @@ impl ContentEditorWindow {
         let release_subscription = cx.observe_release(&entity, |_, _, cx| cx.notify());
         let editor = cx.new(|cx| EditorState::new(window, cx).line_number(true));
         let editor_subscription = cx.observe(&editor, |_, _, cx| cx.notify());
+        // The panel can be summoned above another app while this editor is
+        // minimized. Yield the panel again if the user restores the editor.
+        let activation = cx.observe_window_activation(window, |this, editor, cx| {
+            if !editor.is_window_active() || native_window::is_window_minimized(editor) {
+                return;
+            }
+            let _ = this.owner.update(cx, |view, cx| {
+                if view.editor_main_level.is_none()
+                    && view.editor_window == Some(editor.window_handle())
+                {
+                    let _ = view.main_window.update(cx, |_, main, _| {
+                        if native_window::is_window_shown(main)
+                            && !native_window::is_window_minimized(main)
+                        {
+                            view.lower_main_for_editor(main);
+                        }
+                    });
+                    if view.editor_main_level.is_some() {
+                        // Removing TOPMOST can put the panel first in the normal band.
+                        native_window::raise_front(editor);
+                    }
+                }
+            });
+        });
         window_lifecycle::bind_satellite_release(owner.clone(), window, cx);
         Self {
             owner,
@@ -53,6 +78,7 @@ impl ContentEditorWindow {
             _owner_subscription: subscription,
             _owner_release_subscription: release_subscription,
             _editor_subscription: editor_subscription,
+            _activation: activation,
         }
     }
 

@@ -1,96 +1,37 @@
+mod opening;
+#[cfg(all(test, windows))]
+mod opening_tests;
+
 use super::*;
 
 impl ClipboardView {
     pub(super) fn open_settings_window(&mut self, page: SettingsPage, cx: &mut Context<Self>) {
-        self.close_hover_preview("settings_opening", cx);
-        // The history window floats above every app; hide it so settings is not covered.
-        let main_window = self.main_window;
-        let view = cx.weak_entity();
-        cx.defer(move |cx| {
-            let _ = main_window.update(cx, |_, window, cx| {
-                view.update(cx, |this, cx| this.hide_window(window, cx))
-            });
-            cx.activate(true);
-        });
-        if let Some(handle) = self.settings_window {
-            if handle
-                .update(cx, |_, window, _| {
-                    native_window::set_window_visible(window, true)
-                })
-                .is_ok()
-            {
-                return;
-            }
-            self.settings_window = None;
-        }
+        // Queue one transaction even for reuse: settings observes this view, and
+        // the tray callback can still be borrowing both the view and the main window.
         if self.settings_window_opening {
             return;
         }
 
         self.settings_window_opening = true;
-        self.refresh_data_size(cx);
-        self.refresh_daily_counts(cx);
-        cx.notify();
+        let main = self.main_window;
         let owner = cx.weak_entity();
-        // Run after this view's update releases its borrow; unlike a spawned task,
-        // a deferred effect also runs when the main window is hidden in the tray.
         cx.defer(move |cx| {
-            let Some(owner_entity) = owner.upgrade() else {
+            let Some(owner) = owner.upgrade() else {
                 return;
             };
-            let (theme, language) =
-                owner_entity.update(cx, |owner, _| (owner.theme, owner.language));
-            let window_effect = owner_entity.read(cx).window_effect.value;
-            let options = WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-                    None,
-                    size(px(800.), px(540.)),
-                    cx,
-                ))),
-                titlebar: Some(TitlebarOptions {
-                    title: Some(tr(language, "设置", "Settings").into()),
-                    ..TitleBar::title_bar_options()
-                }),
-                window_min_size: Some(size(px(700.), px(420.))),
-                focus: true,
-                show: true,
-                app_id: Some("com.aslant.ElegantClipboard.settings".into()),
-                ..TitleBar::window_options()
-            };
-            let settings_owner = owner.clone();
-            let close_owner = owner.clone();
-            let opened = gpui_kit::open_window(options, cx, move |window, cx| {
-                apply_theme(theme, window, cx);
-                acrylic::init_window_effect(window_effect, window, cx);
-                window.set_window_title(tr(language, "设置", "Settings"));
-                window.on_window_should_close(cx, move |window, cx| {
-                    let _ = close_owner.update(cx, |owner, cx| {
-                        owner.settings_window = None;
-                        cx.notify();
-                    });
-                    // Let GPUI destroy the HWND; a system close leaves it to drop a dead handle.
-                    window.remove_window();
-                    false
-                });
-                cx.new(|cx| SettingsWindowView::new(settings_owner.clone(), page, window, cx))
-            });
-            owner_entity.update(cx, |owner, cx| {
-                owner.settings_window_opening = false;
-                match opened {
-                    Ok((handle, _)) => {
-                        owner.settings_window = Some(handle);
-                    }
-                    Err(error) => {
-                        owner.set_feedback_message(format!(
-                            "{}: {error:?}",
-                            tr(
-                                owner.language,
-                                "无法打开设置窗口",
-                                "Unable to open settings"
-                            )
-                        ));
-                        owner.is_error = true;
-                    }
+            let result = main
+                .update(cx, |_, window, cx| {
+                    opening::present(&owner, page, window, cx)
+                })
+                .and_then(|result| result);
+            owner.update(cx, |this, cx| {
+                this.settings_window_opening = false;
+                if let Err(error) = result {
+                    this.set_feedback_message(format!(
+                        "{}: {error:#}",
+                        tr(this.language, "无法打开设置窗口", "Unable to open settings")
+                    ));
+                    this.is_error = true;
                 }
                 cx.notify();
             });

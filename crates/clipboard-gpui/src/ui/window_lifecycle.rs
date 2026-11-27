@@ -216,7 +216,7 @@ impl ClipboardView {
     }
 
     pub(super) fn hide_visible_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if (self.card_drag_active(cx) && !self.onboarding_visible())
+        if self.main_hide_blocker(cx).is_some()
             || self.paste_state.pending()
             || self.paste_state.merging()
             || self.batch_pending
@@ -281,14 +281,24 @@ impl ClipboardView {
         true
     }
 
-    pub(super) fn hide_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Only an in-panel note blocks hiding; standalone editors remain usable.
+    pub(super) fn main_hide_blocker(&self, cx: &App) -> Option<&'static str> {
         if self.card_drag_active(cx) && !self.onboarding_visible() {
-            return;
+            Some(tr(
+                self.language,
+                "请先结束拖动，然后重试。",
+                "Finish dragging, then try again.",
+            ))
+        } else if self.note_original.is_some() {
+            self.editor_draft_blocker(cx)
+        } else {
+            None
         }
-        // A standalone editor survives panel hiding. An in-panel note is only
-        // dismissed automatically when it is clean and not saving.
-        if self.note_original.is_some()
-            && (self.editor_draft_blocker(cx).is_some() || !self.close_editor(window, cx))
+    }
+
+    pub(super) fn hide_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.main_hide_blocker(cx).is_some()
+            || (self.note_original.is_some() && !self.close_editor(window, cx))
         {
             return;
         }

@@ -67,17 +67,13 @@ pub fn show_without_activation(window: &Window) {
     let Ok((connection, _)) = x11rb::connect(None) else {
         return;
     };
-    let id = id as u32;
-    let _ = set_input_hint(&connection, id, false);
-    let atom = |name: &str| {
-        connection
-            .intern_atom(false, name.as_bytes())
-            .ok()
-            .and_then(|cookie| cookie.reply().ok())
-            .map(|reply| reply.atom)
-    };
+    map_panel(&connection, id as u32);
+}
+
+fn map_panel(connection: &impl Connection, id: u32) {
+    let _ = set_input_hint(connection, id, false);
     // EWMH: user time 0 asks the window manager not to focus the window on map.
-    if let Some(user_time) = atom("_NET_WM_USER_TIME") {
+    if let Some(user_time) = intern(connection, "_NET_WM_USER_TIME") {
         let _ = connection.change_property32(
             PropMode::REPLACE,
             id,
@@ -86,10 +82,7 @@ pub fn show_without_activation(window: &Window) {
             &[0],
         );
     }
-    if let (Some(state), Some(above)) = (atom("_NET_WM_STATE"), atom("_NET_WM_STATE_ABOVE")) {
-        let _ =
-            connection.change_property32(PropMode::REPLACE, id, state, AtomEnum::ATOM, &[above]);
-    }
+    let _ = request_above(connection, id, true, false);
     let _ = connection.map_window(id);
     let _ = connection.flush();
 }
@@ -127,8 +120,17 @@ pub fn restore_after_editor(window: &Window, _: MainWindowLevel) {
 fn update_above(window: &Window, above: bool, require_present: bool) -> Option<()> {
     let id = window_id(window)? as u32;
     let (connection, _) = x11rb::connect(None).ok()?;
-    let state = intern(&connection, "_NET_WM_STATE")?;
-    let flag = intern(&connection, "_NET_WM_STATE_ABOVE")?;
+    request_above(&connection, id, above, require_present)
+}
+
+fn request_above(
+    connection: &impl Connection,
+    id: u32,
+    above: bool,
+    require_present: bool,
+) -> Option<()> {
+    let state = intern(connection, "_NET_WM_STATE")?;
+    let flag = intern(connection, "_NET_WM_STATE_ABOVE")?;
     let attributes = connection.get_window_attributes(id).ok()?.reply().ok()?;
     let managed = attributes.map_state != MapState::UNMAPPED && !attributes.override_redirect;
     if require_present || !managed {
@@ -204,4 +206,49 @@ fn set_input_hint(connection: &impl Connection, id: u32, input: bool) -> anyhow:
     hints.input = Some(input);
     hints.set(connection, id)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use x11rb::protocol::xproto::{CreateWindowAux, WindowClass};
+
+    #[test]
+    #[ignore = "requires a private Xvfb server"]
+    fn x11_panel_show_preserves_other_window_states() -> anyhow::Result<()> {
+        anyhow::ensure!(std::env::var("ELEGANT_X11_TEST_SERVER").as_deref() == Ok("private-xvfb"));
+        let (connection, screen) = x11rb::connect(None)?;
+        let id = connection.generate_id()?;
+        let root = connection.setup().roots[screen].root;
+        connection
+            .create_window(
+                x11rb::COPY_DEPTH_FROM_PARENT,
+                id,
+                root,
+                0,
+                0,
+                1,
+                1,
+                0,
+                WindowClass::INPUT_OUTPUT,
+                x11rb::COPY_FROM_PARENT,
+                &CreateWindowAux::default(),
+            )?
+            .check()?;
+        let state = intern(&connection, "_NET_WM_STATE").unwrap();
+        let skip = intern(&connection, "_NET_WM_STATE_SKIP_TASKBAR").unwrap();
+        let above = intern(&connection, "_NET_WM_STATE_ABOVE").unwrap();
+        connection
+            .change_property32(PropMode::REPLACE, id, state, AtomEnum::ATOM, &[skip])?
+            .check()?;
+        for _ in 0..2 {
+            map_panel(&connection, id);
+            let reply = connection
+                .get_property(false, id, state, AtomEnum::ATOM, 0, u32::MAX)?
+                .reply()?;
+            assert_eq!(reply.value32().unwrap().collect::<Vec<_>>(), [skip, above]);
+            connection.unmap_window(id)?.check()?;
+        }
+        Ok(())
+    }
 }

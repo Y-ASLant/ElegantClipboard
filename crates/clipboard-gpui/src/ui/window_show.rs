@@ -102,16 +102,7 @@ impl ClipboardView {
         native_window::set_window_visible(window, true);
         #[cfg(target_os = "linux")]
         native_window::show_without_activation(window);
-        if let Some(editor) = self.editor_window {
-            self.lower_main_for_editor(window);
-            let _ = editor.update(cx, |_, editor_window, _| {
-                native_window::raise_front(editor_window);
-            });
-        }
-        #[cfg(target_os = "macos")]
-        if self.editor_window.is_none() {
-            native_window::raise_above(window);
-        }
+        self.stack_shown_panel(window, cx);
         log_window_geometry(window, cx, "main_shown");
         if self.onboarding_visible() {
             window.focus(&self.list_focus, cx);
@@ -137,5 +128,29 @@ impl ClipboardView {
             }
         }
         cx.notify();
+    }
+
+    fn stack_shown_panel(&mut self, window: &Window, cx: &mut Context<Self>) {
+        if let Some(editor) = self.editor_window
+            && editor
+                .update(cx, |_, editor, _| {
+                    if !native_window::is_window_shown(editor)
+                        || native_window::is_window_minimized(editor)
+                    {
+                        return false;
+                    }
+                    self.lower_main_for_editor(window);
+                    native_window::raise_front(editor);
+                    true
+                })
+                .unwrap_or(false)
+        {
+            return;
+        }
+        // This show now owns the panel level; a minimized editor's later release
+        // must not replay an old level over a subsequent user activation.
+        self.editor_main_level = None;
+        #[cfg(target_os = "macos")]
+        native_window::raise_above(window);
     }
 }
