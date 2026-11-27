@@ -156,9 +156,11 @@ impl ClipboardView {
             self.is_error = true;
         } else if let Some(target) = target.filter(|target| {
             target.id != drag.id
-                && self.history.items.loaded().any(|(_, item)| {
-                    item.id == target.id && item.is_pinned == drag.pinned
-                })
+                && self
+                    .history
+                    .items
+                    .loaded()
+                    .any(|(_, item)| item.id == target.id && item.is_pinned == drag.pinned)
         }) && self.send(
             Command::Reorder {
                 from: drag.id,

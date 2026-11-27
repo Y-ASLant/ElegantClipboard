@@ -1,22 +1,27 @@
 use super::*;
 
-struct HistorySnapshot {
-    items: Vec<DbClipboardItem>,
-    total: i64,
-    offset: usize,
-    structural: bool,
-    generation: u64,
+pub(super) struct HistorySnapshot {
+    pub(super) items: Vec<DbClipboardItem>,
+    pub(super) total: i64,
+    pub(super) offset: usize,
+    pub(super) structural: bool,
+    pub(super) generation: u64,
+    pub(super) all_page: Option<(Vec<DbClipboardItem>, i64)>,
 }
 
 impl HistorySnapshot {
     fn apply(self, history: &mut HistoryState) -> bool {
-        history.apply(
+        let applied = history.apply(
             self.items,
             self.total,
             self.offset,
             self.structural,
             self.generation,
-        )
+        );
+        if let Some((items, total)) = self.all_page {
+            history.remember_all_page(items, total, self.generation);
+        }
+        applied
     }
 }
 
@@ -331,28 +336,20 @@ impl ClipboardView {
 
     pub(super) fn apply_snapshot(
         &mut self,
-        items: Vec<DbClipboardItem>,
-        total: i64,
-        offset: usize,
-        structural: bool,
-        generation: u64,
+        snapshot: HistorySnapshot,
         cx: &mut Context<Self>,
     ) -> bool {
-        if generation != self.history.generation {
+        if snapshot.generation != self.history.generation {
+            if snapshot.structural && self.history.favorite_only() {
+                self.history.invalidate_all_view();
+            }
             return true;
         }
-        if structural {
+        if snapshot.structural {
             self.pending_pages.clear();
         } else {
-            self.retire_history_pages(offset, items.len());
+            self.retire_history_pages(snapshot.offset, snapshot.items.len());
         }
-        let snapshot = HistorySnapshot {
-            items,
-            total,
-            offset,
-            structural,
-            generation,
-        };
         if self.external_drag.is_some() && !self.history.loading {
             self.drag_snapshots
                 .push(snapshot, |offset| self.history.items.wants_page(offset));
@@ -364,7 +361,9 @@ impl ClipboardView {
         true
     }
 
-    fn history_snapshot_applied(&mut self, cx: &mut Context<Self>) {
+    /// A worker reply and an immediately restored view both need matching geometry
+    /// and card assets before the list renders.
+    pub(super) fn history_snapshot_applied(&mut self, cx: &mut Context<Self>) {
         if self.scroll_to_top_generation.take() == Some(self.history.generation) {
             self.scroll_to_top();
         }
@@ -447,6 +446,7 @@ mod tests {
             offset,
             structural,
             generation: 0,
+            all_page: None,
         };
         let mut history = HistoryState::default();
         assert!(snapshot(1, 0, true).apply(&mut history));

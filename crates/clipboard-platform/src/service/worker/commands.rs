@@ -10,7 +10,6 @@ use std::path::Path;
 
 impl Worker {
     pub(in crate::service) fn handle(&mut self, command: Command) -> Result<()> {
-        let merges_rows = matches!(command, Command::Query { .. });
         match command {
             Command::Query {
                 search,
@@ -21,6 +20,16 @@ impl Worker {
                 offset,
                 generation,
             } => {
+                let reason = if generation != self.generation
+                    || favorite_only != self.favorite_only
+                    || search != self.search
+                    || group_id != self.group_id
+                    || category != self.category
+                {
+                    super::SnapshotReason::Scope
+                } else {
+                    super::SnapshotReason::Page
+                };
                 self.search = search;
                 self.favorite_only = favorite_only;
                 self.category = category;
@@ -28,6 +37,7 @@ impl Worker {
                 self.limit = limit;
                 self.offset = offset;
                 self.generation = generation;
+                return self.send_snapshot(reason);
             }
             Command::Capture(text) => {
                 self.history.capture_with_media(&text, &self.images_dir)?;
@@ -138,7 +148,7 @@ impl Worker {
                     .edit_text(id, &expected_hash, &new_text, &self.images_dir)
                     .map_err(|error| error.to_string());
                 if matches!(&result, Ok(true)) {
-                    self.snapshot_structural(false)?;
+                    self.snapshot()?;
                 }
                 self.send_event(Event::TextEdited {
                     id,
@@ -531,7 +541,7 @@ impl Worker {
             }
             Command::Pause(paused) => return self.handle_pause(paused),
         }
-        self.snapshot_structural(!merges_rows)
+        self.snapshot()
     }
 
     fn handle_preview(&mut self, id: i64, generation: u64, hover: bool) -> Result<()> {

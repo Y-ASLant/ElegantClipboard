@@ -60,13 +60,17 @@ impl ClipboardView {
                 total,
                 offset,
                 structural,
+                all_page,
                 generation,
             } => self.apply_snapshot(
-                items,
-                total,
-                usize::try_from(offset).unwrap_or(0),
-                structural,
-                generation,
+                history_events::HistorySnapshot {
+                    items,
+                    total,
+                    offset: usize::try_from(offset).unwrap_or(0),
+                    structural,
+                    generation,
+                    all_page,
+                },
                 cx,
             ),
             Event::Preview {

@@ -61,7 +61,9 @@ impl ClipboardView {
             return false;
         }
         match kind {
-            HistoryConfirmation::Item(id) => self.history.items.known_ids().any(|known| known == id),
+            HistoryConfirmation::Item(id) => {
+                self.history.items.known_ids().any(|known| known == id)
+            }
             other => other.matches_scope(self.history.group_id(), !self.selected_ids.is_empty()),
         }
     }

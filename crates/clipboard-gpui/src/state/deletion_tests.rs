@@ -105,13 +105,19 @@ fn deferred_drag_snapshot_cannot_restore_a_committed_deletion() {
     assert!(deferred.apply_deleted(deleted));
     assert!(!deferred.apply_deleted(deleted));
     assert_eq!(state.items.len(), 2); // The active drag's rows remain frozen.
-    assert!(state.apply(
-        deferred.items.loaded().map(|(_, row)| row.clone()).collect(),
-        deferred.total,
-        0,
-        true,
-        0
-    ));
+    assert!(
+        state.apply(
+            deferred
+                .items
+                .loaded()
+                .map(|(_, row)| row.clone())
+                .collect(),
+            deferred.total,
+            0,
+            true,
+            0
+        )
+    );
     assert!(!state.apply_deleted(deleted));
     assert_eq!(state.total, 1);
     assert_eq!(state.selected, Some(remaining));

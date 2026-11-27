@@ -43,7 +43,9 @@ impl ClipboardView {
         self.close_hover_preview("todos", cx);
         self.close_history_confirmation(window, cx);
         self.group_move_id = None;
-        self.located = None;
+        if self.located.take().is_some() && !self.search.read(cx).value().is_empty() {
+            self.history.invalidate_all_view();
+        }
         self.locate_id = None;
         self.located_matches.clear();
         self.reset_selection();

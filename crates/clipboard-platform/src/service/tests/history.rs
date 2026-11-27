@@ -228,7 +228,18 @@ fn worker_keeps_favorite_filter_during_capture_and_toggle() -> Result<()> {
     })?;
     assert_eq!(next_snapshot(&events, 1).len(), 1);
     service.send(Command::Capture("ordinary %_".into()))?;
-    assert_eq!(next_snapshot(&events, 1)[0].id, id);
+    let Event::Snapshot {
+        items,
+        all_page: Some((all, total)),
+        generation: 1,
+        ..
+    } = next_event(&events)
+    else {
+        bail!("收藏中的采集必须同时更新返回全部时使用的首页");
+    };
+    assert_eq!(items[0].id, id);
+    assert_eq!(total, 2);
+    assert_eq!(all[0].preview.as_deref(), Some("ordinary %_"));
     service.send(Command::ToggleFavorite(id))?;
     assert!(next_snapshot(&events, 1).is_empty());
     service.send(Command::Query {

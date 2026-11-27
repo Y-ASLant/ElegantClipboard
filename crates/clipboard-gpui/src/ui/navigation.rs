@@ -202,6 +202,9 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) {
         let generation = reload.generation();
+        if !self.history.loading {
+            self.history_snapshot_applied(cx);
+        }
         if !debounce {
             if self.query(cx) {
                 self.arm_history_reply_timeout(generation, cx);
@@ -301,7 +304,9 @@ impl ClipboardView {
         self.close_hover_preview("category_changed", cx);
         self.close_history_confirmation(window, cx);
         self.group_move_id = None;
-        self.located = None;
+        if self.located.take().is_some() && !self.search.read(cx).value().is_empty() {
+            self.history.invalidate_all_view();
+        }
         self.todos_open = false;
         self.selected_todo = None;
         self.sync_search_prompt(window, cx);
@@ -342,6 +347,9 @@ impl ClipboardView {
         self.close_hover_preview("locate_in_timeline", cx);
         self.close_history_confirmation(window, cx);
         self.group_move_id = None;
+        if !self.search.read(cx).value().is_empty() {
+            self.history.invalidate_all_view();
+        }
         self.located = Some(id);
         self.located_matches = self.history.items.known_ids().collect();
         let reload = match self.history.set_category(ContentCategory::All) {

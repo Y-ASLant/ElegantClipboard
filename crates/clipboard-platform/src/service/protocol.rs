@@ -439,6 +439,7 @@ pub enum Event {
         total: i64,
         offset: i64,
         structural: bool,
+        all_page: Option<(Vec<ClipboardItem>, i64)>,
         generation: u64,
     },
     Status(String),

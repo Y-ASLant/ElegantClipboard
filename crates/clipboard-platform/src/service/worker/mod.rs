@@ -2,6 +2,7 @@ use super::{CapturedClipboard, Command, Event, capture::CaptureState};
 use anyhow::{Result, anyhow};
 use clipboard_core::{
     ContentCategory, History,
+    database::ClipboardItem,
     preferences::{AppFilterPreference, MonitorTypesPreference, Preferences},
     search::search_excerpt,
 };
@@ -64,6 +65,13 @@ pub(super) struct Worker {
     pub(super) events: async_channel::Sender<Event>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SnapshotReason {
+    Page,
+    Scope,
+    Mutation,
+}
+
 impl Worker {
     /// 启动清扫：图片临时文件、blob pending，以及库中已无引用的正式 blob。
     pub(super) fn sweep_temp_media(&self) -> Result<()> {
@@ -83,14 +91,11 @@ impl Worker {
     }
 
     pub(super) fn snapshot(&mut self) -> Result<()> {
-        self.snapshot_structural(true)
+        self.send_snapshot(SnapshotReason::Mutation)
     }
 
-    /// `structural` snapshots follow mutations and captures: positions outside
-    /// the page may have shifted, so the UI drops every other slot. Query
-    /// answers are the only non-structural source: they only page data in.
-    pub(super) fn snapshot_structural(&mut self, structural: bool) -> Result<()> {
-        let event = self.snapshot_event(structural)?;
+    fn send_snapshot(&mut self, reason: SnapshotReason) -> Result<()> {
+        let event = self.snapshot_event(reason)?;
         self.snapshot_pending = false;
         self.send_event(event)
     }
@@ -99,7 +104,7 @@ impl Worker {
         if !self.snapshot_pending || self.events.is_full() || self.events.is_closed() {
             return Ok(());
         }
-        let event = self.snapshot_event(true)?;
+        let event = self.snapshot_event(SnapshotReason::Mutation)?;
         match self.events.try_send(event) {
             Ok(()) | Err(async_channel::TrySendError::Closed(_)) => {
                 self.snapshot_pending = false;
@@ -109,19 +114,51 @@ impl Worker {
         Ok(())
     }
 
-    fn snapshot_event(&self, structural: bool) -> Result<Event> {
+    fn snapshot_event(&self, reason: SnapshotReason) -> Result<Event> {
+        let structural = reason == SnapshotReason::Mutation;
         // Captures insert at the top and shift every position, so a structural
         // refresh re-reads from row zero: no earlier window survives intact.
         let offset = if structural { 0 } else { self.offset };
+        let (items, total) =
+            self.read_page(self.favorite_only, self.category, offset, self.limit)?;
+        // Keep the return page current without changing the worker's active filter.
+        // Scrolling Favorites alone cannot change All and needs no companion query.
+        let all_page = (self.favorite_only && reason != SnapshotReason::Page)
+            .then(|| {
+                self.read_page(
+                    false,
+                    ContentCategory::All,
+                    0,
+                    clipboard_core::HISTORY_PAGE_ROWS as i64,
+                )
+            })
+            .transpose()?;
+        Ok(Event::Snapshot {
+            items,
+            total,
+            offset,
+            structural,
+            all_page,
+            generation: self.generation,
+        })
+    }
+
+    fn read_page(
+        &self,
+        favorite_only: bool,
+        category: ContentCategory,
+        offset: i64,
+        limit: i64,
+    ) -> Result<(Vec<ClipboardItem>, i64)> {
         let mut items = self
             .history
             .list_page_in_group(
                 &self.search,
-                self.limit,
+                limit,
                 offset,
-                self.favorite_only,
+                favorite_only,
                 self.group_id,
-                self.category,
+                category,
             )
             .map_err(|error| anyhow!("读取历史记录失败：{error}"))?;
         for item in &mut items {
@@ -136,17 +173,12 @@ impl Worker {
                 item.preview = Some(excerpt);
             }
         }
-        Ok(Event::Snapshot {
-            items,
-            total: self.history.count_filtered_in_group(
-                &self.search,
-                self.favorite_only,
-                self.group_id,
-                self.category,
-            )?,
-            offset,
-            structural,
-            generation: self.generation,
-        })
+        let total = self.history.count_filtered_in_group(
+            &self.search,
+            favorite_only,
+            self.group_id,
+            category,
+        )?;
+        Ok((items, total))
     }
 }

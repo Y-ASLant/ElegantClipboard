@@ -4,11 +4,12 @@ use std::{collections::VecDeque, ops::Range};
 // Keep a little room for direction changes. Only the visible/prefetch pages are fetched.
 const WINDOW_ROWS: usize = 4 * HISTORY_PAGE_ROWS;
 
-/// Geometry and remembered IDs use absolute slots; only a bounded, contiguous
-/// window can own metadata. A jump never allocates the intervening rows.
+/// Absolute slots remember IDs. Metadata is bounded by the scrolling window
+/// plus All's first page, so returning to the top doesn't need another fetch.
 #[derive(Default)]
 pub struct HistoryItems {
     pub(super) ids: Vec<Option<i64>>,
+    head: Vec<Option<ClipboardItem>>,
     rows: VecDeque<Option<ClipboardItem>>,
     start: usize,
     window_start: usize,
@@ -25,6 +26,9 @@ impl HistoryItems {
 
     pub fn get(&self, index: usize) -> Option<&Option<ClipboardItem>> {
         (index < self.len()).then(|| {
+            if let Some(row) = self.head.get(index) {
+                return row;
+            }
             index
                 .checked_sub(self.start)
                 .and_then(|slot| self.rows.get(slot))
@@ -34,11 +38,13 @@ impl HistoryItems {
 
     #[cfg(test)]
     pub(super) fn metadata_capacity(&self) -> usize {
-        self.rows.capacity()
+        self.head.capacity() + self.rows.capacity()
     }
 
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = &Option<ClipboardItem>> {
-        std::iter::repeat_n(&None, self.start)
+        self.head
+            .iter()
+            .chain(std::iter::repeat_n(&None, self.start - self.head.len()))
             .chain(self.rows.iter())
             .chain(std::iter::repeat_n(
                 &None,
@@ -47,16 +53,25 @@ impl HistoryItems {
     }
 
     pub fn loaded(&self) -> impl DoubleEndedIterator<Item = (usize, &ClipboardItem)> {
-        self.rows
+        self.head
             .iter()
             .enumerate()
-            .filter_map(move |(i, row)| Some((self.start + i, row.as_ref()?)))
+            .chain(
+                self.rows
+                    .iter()
+                    .enumerate()
+                    .map(|(i, row)| (self.start + i, row)),
+            )
+            .filter_map(|(i, row)| Some((i, row.as_ref()?)))
     }
 
     pub fn loaded_range(&self, range: Range<usize>) -> impl Iterator<Item = &ClipboardItem> {
         let start = range.start.saturating_sub(self.start).min(self.rows.len());
         let end = range.end.saturating_sub(self.start).min(self.rows.len());
-        self.rows.range(start..end).flatten()
+        self.head[range.start.min(self.head.len())..range.end.min(self.head.len())]
+            .iter()
+            .chain(self.rows.range(start..end))
+            .flatten()
     }
 
     pub fn known_ids(&self) -> impl DoubleEndedIterator<Item = i64> + '_ {
@@ -102,13 +117,21 @@ impl HistoryItems {
         total: usize,
         offset: usize,
         reset: bool,
+        keep_head: bool,
     ) {
         if reset {
             self.ids.clear();
+            self.head.clear();
             self.rows.clear();
         }
         self.ids.resize(total, None);
-        let lower = self.window_start.min(total);
+        let head_limit = if keep_head {
+            HISTORY_PAGE_ROWS.min(total)
+        } else {
+            0
+        };
+        self.head.truncate(head_limit);
+        let lower = self.window_start.max(head_limit).min(total);
         let upper = self.window_start.saturating_add(WINDOW_ROWS).min(total);
         self.rows.truncate(upper.saturating_sub(self.start));
         let drop = lower.saturating_sub(self.start).min(self.rows.len());
@@ -130,9 +153,15 @@ impl HistoryItems {
                 self.rows.resize_with(to - self.start, || None);
             }
         }
+        let head_end = end.min(head_limit);
+        if offset < head_end && self.head.len() < head_end {
+            self.head.resize_with(head_end, || None);
+        }
         for (i, item) in (offset..end).zip(items) {
             self.ids[i] = Some(item.id);
-            if (from..to).contains(&i) {
+            if i < head_end {
+                self.head[i] = Some(item);
+            } else if (from..to).contains(&i) {
                 self.rows[i - self.start] = Some(item);
             }
         }
@@ -143,6 +172,16 @@ impl HistoryItems {
             return false;
         };
         self.ids.remove(index);
+        if index < self.head.len() {
+            self.head.remove(index);
+            // A resident row immediately after the first page slides into it.
+            if self.start == self.head.len() + 1
+                && let Some(row) = self.rows.pop_front()
+            {
+                self.head.push(row);
+                return true;
+            }
+        }
         if index < self.start {
             self.start -= 1;
         } else if index - self.start < self.rows.len() {
