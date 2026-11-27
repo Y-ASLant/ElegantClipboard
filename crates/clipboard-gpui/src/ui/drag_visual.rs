@@ -83,7 +83,7 @@ impl HistoryCardSnapshot {
             .text_color(if self.file_warning {
                 cx.theme().danger
             } else {
-                cx.theme().muted_foreground
+                cx.theme().muted_foreground.opacity(0.85)
             })
             .child(
                 div()
