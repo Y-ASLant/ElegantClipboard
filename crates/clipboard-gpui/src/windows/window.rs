@@ -267,8 +267,8 @@ pub fn set_click_activate_bounds(window: &Window, bounds: Option<Bounds<Pixels>>
     set_click_activate_region(hwnd.0 as isize, bounds, window.scale_factor());
 }
 
-/// Take keyboard focus for text input, then drop the topmost band so later
-/// windows (settings, dialogs) can stack above the history window again.
+/// Take keyboard focus for text input. Only the non-activating history panel
+/// relinquishes its temporary topmost level; an editor's pin is user-owned.
 pub fn activate_for_input(window: &Window) {
     let Some(hwnd) = window_hwnd(window) else {
         return;
@@ -333,7 +333,9 @@ fn activate_hwnd_for_input(hwnd: HWND) {
             let _ = SetActiveWindow(hwnd);
             let _ = SetFocus(Some(hwnd));
         }
-        drop_topmost_if_set(hwnd);
+        if is_click_suppression_enabled(hwnd.0 as isize) {
+            drop_topmost_if_set(hwnd);
+        }
     } else if is_click_suppression_enabled(hwnd.0 as isize) {
         // Never leave a click-suppressed panel without WS_EX_NOACTIVATE if activation
         // was denied (e.g. UIPI against an elevated foreground window): WM_ACTIVATE
