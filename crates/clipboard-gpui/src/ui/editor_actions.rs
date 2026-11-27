@@ -258,15 +258,17 @@ impl ClipboardView {
             return true;
         }
         let note = self.note_original.is_some();
-        self.release_editor_session();
-        if let Some(handle) = self.editor_window.take() {
+        if let Some(handle) = self.editor_window {
             cx.defer(move |cx| {
                 let _ = handle.update(cx, |_, editor_window, _| editor_window.remove_window());
             });
-        } else if note {
-            self.note_input
-                .update(cx, |input, cx| input.set_value("", window, cx));
-            window.close_dialog(cx);
+        } else {
+            self.release_editor_session();
+            if note {
+                self.note_input
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+                window.close_dialog(cx);
+            }
         }
         if !window.has_active_dialog(cx) {
             window.focus(&self.list_focus, cx);

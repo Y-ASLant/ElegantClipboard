@@ -4,7 +4,8 @@ use x11rb::{
     connection::Connection,
     properties::WmHints,
     protocol::xproto::{
-        AtomEnum, ConfigureWindowAux, ConnectionExt, MapState, PropMode, StackMode,
+        AtomEnum, ClientMessageEvent, ConfigureWindowAux, ConnectionExt, EventMask, MapState,
+        PropMode, StackMode,
     },
     wrapper::ConnectionExt as _,
 };
@@ -109,40 +110,70 @@ pub fn set_click_activate_bounds(_window: &Window, _bounds: Option<Bounds<Pixels
 
 /// Keep or drop `_NET_WM_STATE_ABOVE` without asking for focus.
 pub fn set_above(window: &Window, above: bool) {
-    let Some(id) = window_id(window) else {
-        return;
-    };
-    let Ok((connection, _)) = x11rb::connect(None) else {
-        return;
-    };
-    let id = id as u32;
-    let Some(state) = intern(&connection, "_NET_WM_STATE") else {
-        return;
-    };
-    let Some(flag) = intern(&connection, "_NET_WM_STATE_ABOVE") else {
-        return;
-    };
-    let mut values = connection
-        .get_property(false, id, state, AtomEnum::ATOM, 0, 32)
-        .ok()
-        .and_then(|cookie| cookie.reply().ok())
-        .and_then(|reply| reply.value32().map(|values| values.collect::<Vec<_>>()))
-        .unwrap_or_default();
-    let present = values.contains(&flag);
-    if above && !present {
-        values.push(flag);
-    } else if !above && present {
-        values.retain(|atom| *atom != flag);
-    } else {
-        return;
-    }
-    let _ = connection.change_property32(PropMode::REPLACE, id, state, AtomEnum::ATOM, &values);
-    let _ = connection.flush();
+    let _ = update_above(window, above, false);
 }
 
-/// Drop `_NET_WM_STATE_ABOVE` so an editor can stack over the history panel.
-pub fn release_above(window: &Window) {
-    set_above(window, false);
+#[derive(Clone, Copy)]
+pub struct MainWindowLevel(());
+
+pub fn lower_for_editor(window: &Window) -> Option<MainWindowLevel> {
+    update_above(window, false, true).map(|()| MainWindowLevel(()))
+}
+
+pub fn restore_after_editor(window: &Window, _: MainWindowLevel) {
+    set_above(window, true);
+}
+
+fn update_above(window: &Window, above: bool, require_present: bool) -> Option<()> {
+    let id = window_id(window)? as u32;
+    let (connection, _) = x11rb::connect(None).ok()?;
+    let state = intern(&connection, "_NET_WM_STATE")?;
+    let flag = intern(&connection, "_NET_WM_STATE_ABOVE")?;
+    let attributes = connection.get_window_attributes(id).ok()?.reply().ok()?;
+    let managed = attributes.map_state != MapState::UNMAPPED && !attributes.override_redirect;
+    if require_present || !managed {
+        let reply = connection
+            .get_property(false, id, state, AtomEnum::ATOM, 0, u32::MAX)
+            .ok()?
+            .reply()
+            .ok()?;
+        let present = reply
+            .value32()
+            .is_some_and(|mut atoms| atoms.any(|atom| atom == flag));
+        if present == above {
+            return None;
+        }
+        if !managed {
+            // Unmanaged windows supply their desired state through the property.
+            let cookie = if above {
+                connection.change_property32(PropMode::APPEND, id, state, AtomEnum::ATOM, &[flag])
+            } else {
+                let remaining: Vec<_> = reply.value32()?.filter(|atom| *atom != flag).collect();
+                connection.change_property32(
+                    PropMode::REPLACE,
+                    id,
+                    state,
+                    AtomEnum::ATOM,
+                    &remaining,
+                )
+            };
+            return cookie.ok()?.check().ok();
+        }
+    }
+    // For managed windows only the WM edits the state property. An unconditional add
+    // on restore also follows a pending remove if the editor closes immediately.
+    let root = connection.query_tree(id).ok()?.reply().ok()?.root;
+    let event = ClientMessageEvent::new(32, id, state, [u32::from(above), flag, 0, 1, 0]);
+    connection
+        .send_event(
+            false,
+            root,
+            EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY,
+            event,
+        )
+        .ok()?
+        .check()
+        .ok()
 }
 
 /// Place the window above its siblings without asking for focus.

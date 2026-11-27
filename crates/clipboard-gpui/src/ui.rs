@@ -354,6 +354,7 @@ struct ClipboardView {
     editor: PreviewState,
     /// 正文编辑的独立窗口。备注仍用主窗口对话框。
     editor_window: Option<AnyWindowHandle>,
+    editor_main_level: Option<native_window::MainWindowLevel>,
     editor_input: Option<(Entity<EditorState>, Rope)>,
     editor_discard_open: bool,
     note_input: Entity<InputState>,

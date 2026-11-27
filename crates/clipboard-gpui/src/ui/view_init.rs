@@ -367,6 +367,7 @@ impl ClipboardView {
             located_matches: HashSet::new(),
             editor: PreviewState::default(),
             editor_window: None,
+            editor_main_level: None,
             editor_input: None,
             editor_discard_open: false,
             note_input: cx.new(|cx| {

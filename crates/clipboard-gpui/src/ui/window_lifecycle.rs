@@ -74,6 +74,7 @@ impl ClipboardView {
             if !self.editor_pending() && !self.todo_edit_saving {
                 self.release_editor_session();
             }
+            self.restore_main_after_editor(cx);
         }
         if changed {
             cx.notify();

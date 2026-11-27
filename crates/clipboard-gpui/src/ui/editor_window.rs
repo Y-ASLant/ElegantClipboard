@@ -140,6 +140,33 @@ impl ClipboardView {
         });
     }
 
+    pub(super) fn lower_main_for_editor(&mut self, window: &Window) {
+        if let Some(level) = native_window::lower_for_editor(window) {
+            self.editor_main_level = Some(level);
+        }
+    }
+
+    pub(super) fn restore_main_after_editor(&mut self, cx: &mut Context<Self>) {
+        if self.editor_main_level.is_none() {
+            return;
+        }
+        let main = self.main_window;
+        let owner = cx.weak_entity();
+        cx.defer(move |cx| {
+            let _ = main.update(cx, |_, window, cx| {
+                let _ = owner.update(cx, |view, _| {
+                    if view.editor_window.is_none()
+                        && let Some(level) = view.editor_main_level.take()
+                        && native_window::is_window_shown(window)
+                        && !native_window::is_window_minimized(window)
+                    {
+                        native_window::restore_after_editor(window, level);
+                    }
+                });
+            });
+        });
+    }
+
     pub(super) fn open_editor_window(
         &mut self,
         window: &mut Window,
@@ -163,8 +190,8 @@ impl ClipboardView {
                 return;
             }
             // Panel is topmost and non-activating; drop that before the editor exists.
-            let _ = main_window.update(cx, |_, window, _| {
-                native_window::release_above(window);
+            let _ = main_window.update(cx, |_, window, cx| {
+                owner_entity.update(cx, |view, _| view.lower_main_for_editor(window));
             });
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -199,6 +226,7 @@ impl ClipboardView {
                     }
                     Err(error) => {
                         owner.fail_content_editor_open(error, cx);
+                        owner.restore_main_after_editor(cx);
                         None
                     }
                 };
@@ -218,8 +246,6 @@ impl ClipboardView {
         if self.editor_pending() || self.todo_edit_saving {
             return false;
         }
-        self.editor_window = None;
-        self.release_editor_session();
         let focus = self.list_focus.clone();
         let main = self.main_window;
         cx.defer(move |cx| {

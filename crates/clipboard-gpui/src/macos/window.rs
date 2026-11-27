@@ -79,9 +79,23 @@ pub fn set_above(window: &Window, above: bool) {
     );
 }
 
-/// Drop the popup band so a normal editor can appear above the history panel.
-pub fn release_above(window: &Window) {
-    set_above(window, false);
+#[derive(Clone, Copy)]
+pub struct MainWindowLevel(isize);
+
+pub fn lower_for_editor(window: &Window) -> Option<MainWindowLevel> {
+    let native = window_id(window)? as *mut AnyObject;
+    unsafe {
+        let level: isize = msg_send![native, level];
+        if level <= NORMAL_WINDOW_LEVEL {
+            return None;
+        }
+        let _: () = msg_send![native, setLevel: NORMAL_WINDOW_LEVEL];
+        Some(MainWindowLevel(level))
+    }
+}
+
+pub fn restore_after_editor(window: &Window, level: MainWindowLevel) {
+    set_level(window, level.0);
 }
 
 /// Restore the floating panel level used when the history window was created.

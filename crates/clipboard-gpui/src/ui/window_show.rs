@@ -103,7 +103,7 @@ impl ClipboardView {
         #[cfg(target_os = "linux")]
         native_window::show_without_activation(window);
         if let Some(editor) = self.editor_window {
-            native_window::release_above(window);
+            self.lower_main_for_editor(window);
             let _ = editor.update(cx, |_, editor_window, _| {
                 native_window::raise_front(editor_window);
             });

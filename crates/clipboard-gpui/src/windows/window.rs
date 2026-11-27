@@ -352,9 +352,15 @@ pub fn set_above(window: &Window, above: bool) {
     }
 }
 
-/// Leave the topmost band without taking focus.
-pub fn release_above(window: &Window) {
-    set_above(window, false);
+#[derive(Clone, Copy)]
+pub struct MainWindowLevel(());
+
+pub fn lower_for_editor(window: &Window) -> Option<MainWindowLevel> {
+    drop_topmost_if_set(window_hwnd(window)?).then_some(MainWindowLevel(()))
+}
+
+pub fn restore_after_editor(window: &Window, _: MainWindowLevel) {
+    set_above(window, true);
 }
 
 /// Place the window at the top of the non-topmost band without activating it.
@@ -365,10 +371,10 @@ pub fn raise_front(window: &Window) {
     }
 }
 
-fn place(hwnd: HWND, after: Option<HWND>) {
+fn place(hwnd: HWND, after: Option<HWND>) -> bool {
     // SAFETY: hwnd is a live GPUI window. Flags only change z-order.
     unsafe {
-        let _ = SetWindowPos(
+        SetWindowPos(
             hwnd,
             after,
             0,
@@ -376,7 +382,8 @@ fn place(hwnd: HWND, after: Option<HWND>) {
             0,
             0,
             SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
-        );
+        )
+        .is_ok()
     }
 }
 
@@ -396,12 +403,11 @@ fn set_noactivate_style(hwnd: HWND, enabled: bool) {
     }
 }
 
-fn drop_topmost_if_set(hwnd: HWND) {
+fn drop_topmost_if_set(hwnd: HWND) -> bool {
     // SAFETY: hwnd is a live window; z-order only changes when WS_EX_TOPMOST is set.
     unsafe {
-        if (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST.0 as isize) != 0 {
-            place(hwnd, Some(HWND_NOTOPMOST));
-        }
+        (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST.0 as isize) != 0
+            && place(hwnd, Some(HWND_NOTOPMOST))
     }
 }
 
