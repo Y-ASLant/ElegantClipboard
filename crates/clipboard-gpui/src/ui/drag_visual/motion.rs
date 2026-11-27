@@ -116,15 +116,15 @@ impl DragMotionState {
     pub(in crate::ui) fn update(
         &mut self,
         request: Option<(i64, DropTarget)>,
-        ids: impl Iterator<Item = i64> + Clone,
+        index_of: impl Fn(i64) -> Option<usize>,
         row_offsets: &[Pixels],
     ) {
         if self.request == request {
             return;
         }
         let next = request.and_then(|(source, target)| {
-            let source = ids.clone().position(|id| id == source)?;
-            let target_index = ids.clone().position(|id| id == target.id)?;
+            let source = index_of(source)?;
+            let target_index = index_of(target.id)?;
             DragPlacement::new(source, target_index, target.after)
         });
         self.transition(next, row_offsets, std::time::Instant::now());

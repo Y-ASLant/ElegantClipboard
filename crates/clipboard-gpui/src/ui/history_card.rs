@@ -16,7 +16,9 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let item = &self.history.items[index];
+        let Some(item) = self.history.items[index].as_ref() else {
+            return self.render_skeleton_row(index, cx);
+        };
         let id = item.id;
         let is_image = item.content_type == "image";
         let is_files = item.content_type == "files";
@@ -386,6 +388,49 @@ impl ClipboardView {
             .w_full()
             .h(row_height)
             .child(positioned)
+            .into_any_element()
+    }
+
+    /// Rows whose page has not arrived yet render as fixed-height placeholders.
+    /// They never carry data, so every interactive gesture naturally skips them.
+    fn render_skeleton_row(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
+        let spacing = visual::card_spacing(self.display.value.card_density);
+        let padding = visual::card_padding(self.display.value.card_density);
+        let last = index + 1 == self.history.items.len();
+        let height = self
+            .row_sizes
+            .get(index)
+            .map(|size| size.height)
+            .unwrap_or_else(|| px(visual::row_height(self.display.value.card_density, 1)));
+        div()
+            .w_full()
+            .h(height)
+            .child(
+                div()
+                    .mx(px(visual::SPACE_4))
+                    .mt(px(spacing))
+                    .mb(px(if last { PAGE_PADDING } else { spacing }))
+                    .p(px(padding))
+                    .rounded(crate::card_radius::card_radius(cx))
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .flex()
+                    .items_center()
+                    .gap(px(visual::SPACE_3))
+                    .child(
+                        div()
+                            .size(px(visual::SPACE_6))
+                            .rounded(cx.theme().radius)
+                            .bg(cx.theme().muted),
+                    )
+                    .child(
+                        div()
+                            .h(px(visual::TEXT_SMALL))
+                            .w(px(160.))
+                            .rounded_full()
+                            .bg(cx.theme().muted),
+                    ),
+            )
             .into_any_element()
     }
 }

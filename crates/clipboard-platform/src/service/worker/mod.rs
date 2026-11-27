@@ -58,6 +58,7 @@ pub(super) struct Worker {
     pub(super) category: ContentCategory,
     pub(super) group_id: Option<i64>,
     pub(super) limit: i64,
+    pub(super) offset: i64,
     pub(super) generation: u64,
     pub(super) snapshot_pending: bool,
     pub(super) events: async_channel::Sender<Event>,
@@ -82,7 +83,14 @@ impl Worker {
     }
 
     pub(super) fn snapshot(&mut self) -> Result<()> {
-        let event = self.snapshot_event()?;
+        self.snapshot_structural(true)
+    }
+
+    /// `structural` snapshots follow mutations and captures: positions outside
+    /// the page may have shifted, so the UI drops every other slot. Query
+    /// answers are the only non-structural source: they only page data in.
+    pub(super) fn snapshot_structural(&mut self, structural: bool) -> Result<()> {
+        let event = self.snapshot_event(structural)?;
         self.snapshot_pending = false;
         self.send_event(event)
     }
@@ -91,7 +99,7 @@ impl Worker {
         if !self.snapshot_pending || self.events.is_full() || self.events.is_closed() {
             return Ok(());
         }
-        let event = self.snapshot_event()?;
+        let event = self.snapshot_event(true)?;
         match self.events.try_send(event) {
             Ok(()) | Err(async_channel::TrySendError::Closed(_)) => {
                 self.snapshot_pending = false;
@@ -101,12 +109,16 @@ impl Worker {
         Ok(())
     }
 
-    fn snapshot_event(&self) -> Result<Event> {
+    fn snapshot_event(&self, structural: bool) -> Result<Event> {
+        // Captures insert at the top and shift every position, so a structural
+        // refresh re-reads from row zero: no earlier window survives intact.
+        let offset = if structural { 0 } else { self.offset };
         let mut items = self
             .history
-            .list_filtered_in_group(
+            .list_page_in_group(
                 &self.search,
                 self.limit,
+                offset,
                 self.favorite_only,
                 self.group_id,
                 self.category,
@@ -132,6 +144,8 @@ impl Worker {
                 self.group_id,
                 self.category,
             )?,
+            offset,
+            structural,
             generation: self.generation,
         })
     }

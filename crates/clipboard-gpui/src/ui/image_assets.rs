@@ -31,7 +31,7 @@ fn preview_image_path(preview: &PreviewState) -> Option<PathBuf> {
 }
 
 impl ClipboardView {
-    pub(super) fn update_image_visible_range(
+    pub(super) fn update_history_visible_range(
         &mut self,
         visible: Range<usize>,
         window: &Window,
@@ -45,6 +45,7 @@ impl ClipboardView {
             self.image_sync_pending = true;
             cx.defer_in(window, |this, window, cx| {
                 this.image_sync_pending = false;
+                this.request_history_pages(cx);
                 this.sync_image_assets(cx);
                 this.start_thumbnail_jobs(cx);
                 this.release_thumbnail_atlas(window, cx);
@@ -58,29 +59,33 @@ impl ClipboardView {
         let image_dimensions = visual::thumbnail_size(self.display.value.card_density);
         let scale = self.thumbnail_scale;
         let file_card_info = &self.file_card_info;
-        let wanted = self.history.items[range.clone()].iter().filter_map(|item| {
-            let is_image = item.content_type == "image";
-            let path = if is_image {
-                item.image_path.as_ref().map(PathBuf::from)
-            } else {
-                file_card_info
-                    .get(&item.id)
-                    .and_then(|info| info.image_path.clone())
-            }?;
-            Some(thumbnail_cache::ThumbnailKey::new(
-                path,
-                item.content_hash.clone(),
-                item.content_type == "files",
-                if is_image {
-                    image_dimensions
+        let wanted = self
+            .history
+            .items
+            .loaded_range(range.clone())
+            .filter_map(|item| {
+                let is_image = item.content_type == "image";
+                let path = if is_image {
+                    item.image_path.as_ref().map(PathBuf::from)
                 } else {
-                    (48., 36.)
-                },
-                scale,
-            ))
-        });
+                    file_card_info
+                        .get(&item.id)
+                        .and_then(|info| info.image_path.clone())
+                }?;
+                Some(thumbnail_cache::ThumbnailKey::new(
+                    path,
+                    item.content_hash.clone(),
+                    item.content_type == "files",
+                    if is_image {
+                        image_dimensions
+                    } else {
+                        (48., 36.)
+                    },
+                    scale,
+                ))
+            });
         self.thumbnails.retain(wanted);
-        let rows = self.history.items[range].iter().map(|item| {
+        let rows = self.history.items.loaded_range(range).map(|item| {
             let image = (item.content_type == "image")
                 .then(|| item.image_path.as_ref().map(PathBuf::from))
                 .flatten();
@@ -103,6 +108,7 @@ impl ClipboardView {
                 .history
                 .items
                 .iter()
+                .flatten()
                 .find(|item| item.id == id)
                 .and_then(|item| item.image_path.as_ref())
             {

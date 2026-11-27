@@ -125,7 +125,12 @@ impl ClipboardView {
     ) {
         if self.history.loading
             || self.batch_pending
-            || !self.history.items.iter().any(|item| item.id == id)
+            || !self
+                .history
+                .items
+                .iter()
+                .flatten()
+                .any(|item| item.id == id)
         {
             return;
         }
@@ -187,7 +192,12 @@ impl ClipboardView {
         cx.notify();
     }
     fn save_as_suggested_for(&self, id: i64) -> Option<String> {
-        let item = self.history.items.iter().find(|item| item.id == id)?;
+        let item = self
+            .history
+            .items
+            .iter()
+            .flatten()
+            .find(|item| item.id == id)?;
         if item.content_type == "image" {
             item.image_path.as_deref().and_then(save_as_suggested_name)
         } else if item.content_type == "files" {

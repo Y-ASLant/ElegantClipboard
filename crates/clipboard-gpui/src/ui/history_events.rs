@@ -1,5 +1,57 @@
 use super::*;
 
+struct HistorySnapshot {
+    items: Vec<DbClipboardItem>,
+    total: i64,
+    offset: usize,
+    structural: bool,
+    generation: u64,
+}
+
+impl HistorySnapshot {
+    fn apply(self, history: &mut HistoryState) -> bool {
+        history.apply(
+            self.items,
+            self.total,
+            self.offset,
+            self.structural,
+            self.generation,
+        )
+    }
+}
+
+/// Keep the authoritative reset and subsequent wanted pages in delivery order
+/// while the native drag holds its source row and geometry stable.
+#[derive(Default)]
+pub(super) struct DeferredSnapshots(Vec<HistorySnapshot>);
+
+impl DeferredSnapshots {
+    pub(super) fn has_page(&self, offset: usize, generation: u64) -> bool {
+        self.0
+            .iter()
+            .any(|page| page.offset == offset && page.generation == generation)
+    }
+
+    fn push(&mut self, snapshot: HistorySnapshot, wants_page: impl Fn(usize) -> bool) {
+        self.0.retain(|old| {
+            !snapshot.structural
+                && old.generation == snapshot.generation
+                && (old.structural || (wants_page(old.offset) && old.offset != snapshot.offset))
+        });
+        if snapshot.structural || wants_page(snapshot.offset) {
+            self.0.push(snapshot);
+        }
+    }
+
+    fn apply(&mut self, history: &mut HistoryState) -> bool {
+        let mut changed = false;
+        for page in self.0.drain(..) {
+            changed |= page.apply(history);
+        }
+        changed
+    }
+}
+
 impl ClipboardView {
     /// 以下 `apply_*` 为 `apply_event` 按事件域拆分的处理函数；
     /// 返回 `false` 表示该事件在此提前结束（跳过末尾的确认弹窗同步）。
@@ -144,9 +196,6 @@ impl ClipboardView {
         outcome: clipboard_core::DeletionOutcome,
         cx: &mut Context<Self>,
     ) -> bool {
-        if let Some((items, total, _)) = self.drag_snapshot.as_mut() {
-            crate::state::remove_deleted_item(items, total, id);
-        }
         if self.external_drag.is_some() {
             // Preserve frozen rows until the drag session releases its source.
             self.drag_deleted_ids.insert(id);
@@ -282,23 +331,42 @@ impl ClipboardView {
 
     pub(super) fn apply_snapshot(
         &mut self,
-        mut items: Vec<DbClipboardItem>,
-        mut total: i64,
+        items: Vec<DbClipboardItem>,
+        total: i64,
+        offset: usize,
+        structural: bool,
         generation: u64,
         cx: &mut Context<Self>,
     ) -> bool {
-        for &id in &self.drag_deleted_ids {
-            crate::state::remove_deleted_item(&mut items, &mut total, id);
-        }
-        if self.external_drag.is_some()
-            && generation == self.history.generation
-            && !self.history.loading
-        {
-            self.drag_snapshot = Some((items, total, generation));
+        if generation != self.history.generation {
             return true;
         }
-        if !self.history.apply(items, total, generation) {
+        if structural {
+            self.pending_pages.clear();
+        } else {
+            self.retire_history_pages(offset, items.len());
+        }
+        let snapshot = HistorySnapshot {
+            items,
+            total,
+            offset,
+            structural,
+            generation,
+        };
+        if self.external_drag.is_some() && !self.history.loading {
+            self.drag_snapshots
+                .push(snapshot, |offset| self.history.items.wants_page(offset));
             return true;
+        }
+        if snapshot.apply(&mut self.history) {
+            self.history_snapshot_applied(cx);
+        }
+        true
+    }
+
+    fn history_snapshot_applied(&mut self, cx: &mut Context<Self>) {
+        if self.scroll_to_top_generation.take() == Some(self.history.generation) {
+            self.scroll_to_top();
         }
         if self.history_reply_missed {
             self.history_reply_missed = false;
@@ -308,15 +376,17 @@ impl ClipboardView {
         }
         self.reconcile_history_rows(cx);
         self.finish_locate();
-        true
     }
 
-    pub(super) fn finish_drag_deletions(&mut self, cx: &mut Context<Self>) {
-        let mut changed = false;
+    pub(super) fn finish_drag_updates(&mut self, cx: &mut Context<Self>) {
+        let applied = self.drag_snapshots.apply(&mut self.history);
+        let mut deleted = false;
         for id in self.drag_deleted_ids.drain() {
-            changed |= self.history.apply_deleted(id);
+            deleted |= self.history.apply_deleted(id);
         }
-        if changed {
+        if applied {
+            self.history_snapshot_applied(cx);
+        } else if deleted {
             self.reconcile_history_rows(cx);
         }
     }
@@ -330,30 +400,73 @@ impl ClipboardView {
     }
 
     fn reconcile_history_rows(&mut self, cx: &mut Context<Self>) {
-        let loaded_ids: HashSet<_> = self.history.items.iter().map(|item| item.id).collect();
         self.rebuild_rows_keeping_scroll();
         if self
             .hover_preview
             .id
-            .is_some_and(|id| !loaded_ids.contains(&id))
+            .is_some_and(|id| self.history.item_index(id).is_none())
         {
             self.close_hover_preview("history_reconciled", cx);
         }
         self.refresh_file_card_info(cx);
         self.sync_image_assets(cx);
-        self.selected_ids.retain(|id| loaded_ids.contains(id));
-        if self
-            .selection_anchor
-            .is_some_and(|id| !loaded_ids.contains(&id))
-        {
-            self.selection_anchor = None;
+        if !self.selected_ids.is_empty() || self.selection_anchor.is_some() {
+            let known: HashSet<_> = self
+                .history
+                .items
+                .known_ids()
+                .filter(|id| self.selected_ids.contains(id) || self.selection_anchor == Some(*id))
+                .collect();
+            self.selected_ids.retain(|id| known.contains(id));
+            self.selection_anchor = self.selection_anchor.filter(|id| known.contains(id));
         }
         if !self.group_move_pending
             && self
                 .group_move_id
-                .is_some_and(|id| !loaded_ids.contains(&id))
+                .is_some_and(|id| self.history.item_index(id).is_none())
         {
             self.group_move_id = None;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DbClipboardItem, DeferredSnapshots, HistorySnapshot, HistoryState};
+    use clipboard_core::{HISTORY_PAGE_ROWS, History};
+
+    #[test]
+    fn drag_release_replays_only_pages_after_the_latest_reset_at_their_absolute_offsets() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = History::open(dir.path().join("clipboard.db")).unwrap();
+        let row = db.item(db.capture("row").unwrap().unwrap()).unwrap();
+        let page = HISTORY_PAGE_ROWS;
+        let snapshot = |id, offset, structural| HistorySnapshot {
+            items: vec![DbClipboardItem { id, ..row.clone() }],
+            total: (4 * page) as i64,
+            offset,
+            structural,
+            generation: 0,
+        };
+        let mut history = HistoryState::default();
+        assert!(snapshot(1, 0, true).apply(&mut history));
+        let mut queue = DeferredSnapshots::default();
+        queue.push(snapshot(2, page, false), |_| true);
+        assert!(queue.apply(&mut history));
+        assert_eq!(history.item_index(1), Some(0));
+        assert_eq!(history.item_index(2), Some(page));
+
+        queue.push(snapshot(3, 3 * page, false), |_| true);
+        queue.push(snapshot(4, 0, true), |_| true);
+        queue.push(snapshot(5, 2 * page, false), |_| true);
+        queue.push(snapshot(6, page, false), |_| true);
+        assert!(!queue.has_page(3 * page, 0));
+        assert!(queue.has_page(2 * page, 0));
+        assert!(queue.apply(&mut history));
+        assert_eq!(
+            history.items.known_rows().collect::<Vec<_>>(),
+            [(0, 4), (page, 6), (2 * page, 5)]
+        );
+        assert!(!queue.apply(&mut history));
     }
 }

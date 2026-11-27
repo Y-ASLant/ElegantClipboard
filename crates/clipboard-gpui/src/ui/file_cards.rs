@@ -166,7 +166,8 @@ impl ClipboardView {
         let loaded_paths: HashMap<_, _> = self
             .history
             .items
-            .iter()
+            .loaded()
+            .map(|(_, item)| item)
             .filter(|item| item.content_type == "files")
             .map(|item| (item.id, item.file_paths.as_deref().unwrap_or_default()))
             .collect();
@@ -177,7 +178,8 @@ impl ClipboardView {
         let candidates: Vec<_> = self
             .history
             .items
-            .iter()
+            .loaded()
+            .map(|(_, item)| item)
             .filter(|item| {
                 item.content_type == "files" && !self.file_card_checked.contains_key(&item.id)
             })

@@ -177,7 +177,7 @@ impl ClipboardView {
         if self.todos_open {
             return self.memo_pointer_on_source(id, viewport, y);
         }
-        let Some(index) = self.history.items.iter().position(|item| item.id == id) else {
+        let Some(index) = self.history.item_index(id) else {
             tracing::debug!(id, "Hover source miss: history row not found");
             return false;
         };
@@ -187,10 +187,10 @@ impl ClipboardView {
         };
         let top = viewport.top() + *offset + self.scroll.offset().y;
         let bottom = top
-            + px(history_row_height(
-                &self.history.items[index],
-                self.display.value,
-            ));
+            + self.history.items[index].as_ref().map_or_else(
+                || self.row_sizes.get(index).map_or(px(0.), |size| size.height),
+                |item| px(history_row_height(item, self.display.value)),
+            );
         let hit = px(y) >= top && px(y) < bottom;
         if !hit {
             tracing::debug!(
@@ -337,7 +337,12 @@ impl ClipboardView {
                 }
                 return;
             }
-            let Some(item) = self.history.items.iter().find(|item| item.id == id) else {
+            let Some(item) = self
+                .history
+                .items
+                .loaded()
+                .find_map(|(_, item)| (item.id == id).then_some(item))
+            else {
                 return;
             };
             // 图片格式的文件同时属于图片，悬停开关跟图片页用同一口径。

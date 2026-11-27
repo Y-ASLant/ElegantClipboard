@@ -7,6 +7,9 @@ use clipboard_core::{
 use indexmap::IndexSet;
 use std::collections::HashMap;
 
+mod items;
+pub use items::HistoryItems;
+
 /// Return whether to show the name and icon; icon-only falls back to the name.
 pub fn source_app_parts(mode: SourceAppDisplay, has_icon: bool) -> (bool, bool) {
     match mode {
@@ -90,17 +93,19 @@ pub fn format_card_time(
 /// Append newly marked rows in click order, or from the anchor toward the Shift-click.
 pub(crate) fn toggle_batch_mark(
     selected: &mut IndexSet<i64>,
-    items: &[ClipboardItem],
+    items: &HistoryItems,
     anchor: Option<i64>,
     target: i64,
 ) -> bool {
-    let Some(to) = items.iter().position(|item| item.id == target) else {
+    let Some(to) = items.known_index(target) else {
         return false;
     };
-    if let Some(from) = anchor.and_then(|id| items.iter().position(|item| item.id == id)) {
-        let range = items[from.min(to)..=from.max(to)]
+    if let Some(from) = anchor.and_then(|id| items.known_index(id)) {
+        // Evicting metadata doesn't unmark IDs from a previously visited page.
+        let range = items.ids[from.min(to)..=from.max(to)]
             .iter()
-            .map(|item| item.id);
+            .flatten()
+            .copied();
         if from <= to {
             selected.extend(range);
         } else {
@@ -211,26 +216,38 @@ enum HistoryFilter {
 }
 
 /// View state kept independent of GPUI so asynchronous ordering can be tested.
+///
+/// The full filtered order is addressable while only a window of metadata
+/// remains resident. Old rows stay drawable until a new view's first reply.
 pub struct HistoryState {
-    pub items: Vec<ClipboardItem>,
+    pub items: HistoryItems,
     pub total: i64,
     pub generation: u64,
     pub selected: Option<i64>,
     pub loading: bool,
     filter: HistoryFilter,
     group_id: Option<i64>,
+    // The generation whose replies most recently wrote into the slots. A new
+    // view's first page resets the slots: positions in the previous view are
+    // unrelated, and a merge would pair the wrong rows with their indexes.
+    slots_generation: Option<u64>,
+    // Last row the keyboard reached, loaded or not. Slots never move inside a
+    // view, so the index stays valid while pages stream in around it.
+    navigation_index: Option<usize>,
 }
 
 impl Default for HistoryState {
     fn default() -> Self {
         Self {
-            items: Vec::new(),
+            items: HistoryItems::default(),
             total: 0,
             generation: 0,
             selected: None,
             loading: true,
             filter: HistoryFilter::All,
             group_id: None,
+            slots_generation: None,
+            navigation_index: None,
         }
     }
 }
@@ -248,6 +265,16 @@ impl HistoryReload {
 }
 
 impl HistoryState {
+    pub fn item_index(&self, id: i64) -> Option<usize> {
+        self.items
+            .loaded()
+            .find_map(|(i, row)| (row.id == id).then_some(i))
+    }
+
+    pub fn can_page(&self) -> bool {
+        !self.loading && self.slots_generation == Some(self.generation)
+    }
+
     pub fn favorite_only(&self) -> bool {
         matches!(self.filter, HistoryFilter::Favorites)
     }
@@ -305,38 +332,65 @@ impl HistoryState {
         self.begin_search()
     }
 
-    #[must_use = "arm a history query or the list stays loading"]
+    /// Rows stay in place while the replacement is in flight: the previous
+    /// view's data remains visible until the new snapshot swaps it atomically,
+    /// so switching scopes never blanks the list.
     pub fn begin_search(&mut self) -> HistoryReload {
         self.generation += 1;
         self.loading = true;
-        self.items.clear();
         self.selected = None;
-        self.total = 0;
+        self.navigation_index = None;
         HistoryReload {
             generation: self.generation,
         }
     }
 
-    pub fn apply(&mut self, items: Vec<ClipboardItem>, total: i64, generation: u64) -> bool {
+    /// Merge one paged snapshot into the sparse slots. `structural` snapshots
+    /// follow mutations and captures: the worker re-reads the authoritative
+    /// order, so every slot outside the page may have shifted and is dropped.
+    /// Query answers only page in data and merge into the surviving slots.
+    pub fn apply(
+        &mut self,
+        items: Vec<ClipboardItem>,
+        total: i64,
+        offset: usize,
+        structural: bool,
+        generation: u64,
+    ) -> bool {
         if generation != self.generation {
             return false;
         }
-        if !items.iter().any(|item| Some(item.id) == self.selected) {
-            self.selected = items.first().map(|item| item.id);
+        let total_len = usize::try_from(total).unwrap_or(0);
+        let new_view = self.slots_generation != Some(generation);
+        if new_view {
+            self.items.watch(offset..offset.saturating_add(1));
+        } else if !structural && !self.items.wants_page(offset) {
+            return false;
         }
-        self.items = items;
+        self.slots_generation = Some(generation);
+        self.items
+            .merge(items, total_len, offset, structural || new_view);
+        if self
+            .selected
+            .is_none_or(|id| self.items.known_index(id).is_none())
+        {
+            self.selected = match self.navigation_index {
+                Some(i) if !structural && !new_view => self.items.id_at(i),
+                _ => self.items.id_at(offset).or_else(|| self.items.known_ids().next()),
+            };
+        }
         self.total = total;
         self.loading = false;
         true
     }
-
     /// Reconcile a committed deletion without completing an in-flight query.
     pub fn apply_deleted(&mut self, id: i64) -> bool {
-        if !remove_deleted_item(&mut self.items, &mut self.total, id) {
+        if !self.items.remove(id) {
             return false;
         }
+        self.total = self.total.saturating_sub(1).max(0);
         if self.selected == Some(id) {
-            self.selected = self.items.first().map(|item| item.id);
+            self.selected = self.items.known_ids().next();
         }
         true
     }
@@ -350,38 +404,28 @@ impl HistoryState {
     }
 
     pub fn select_relative(&mut self, direction: isize) -> Option<usize> {
-        if self.items.is_empty() {
+        let len = self.items.len();
+        if len == 0 {
             self.selected = None;
             return None;
         }
         let current = self
-            .items
-            .iter()
-            .position(|item| Some(item.id) == self.selected)
+            .selected
+            .and_then(|id| self.items.known_index(id))
+            .or(self.navigation_index)
             .unwrap_or(0);
-        let next = current
-            .saturating_add_signed(direction)
-            .min(self.items.len() - 1);
-        self.selected = Some(self.items[next].id);
-        Some(next)
+        let index = current.saturating_add_signed(direction).min(len - 1);
+        self.navigation_index = Some(index);
+        self.selected = self.items.id_at(index);
+        Some(index)
     }
 
     pub fn select_index(&mut self, index: usize) -> Option<usize> {
         let index = index.min(self.items.len().checked_sub(1)?);
-        self.selected = Some(self.items[index].id);
+        self.navigation_index = Some(index);
+        self.selected = self.items.id_at(index);
         Some(index)
     }
-}
-
-/// Remove only a loaded ID: an absent ID may belong to another filter or an
-/// already refreshed snapshot, whose total must not be decremented again.
-pub fn remove_deleted_item(items: &mut Vec<ClipboardItem>, total: &mut i64, id: i64) -> bool {
-    let Some(index) = items.iter().position(|item| item.id == id) else {
-        return false;
-    };
-    items.remove(index);
-    *total = total.saturating_sub(1).max(0);
-    true
 }
 
 #[cfg(test)]

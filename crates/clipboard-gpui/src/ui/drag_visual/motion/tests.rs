@@ -161,8 +161,9 @@ fn a_stationary_pointer_does_not_reverse_the_same_moving_target() {
 
 #[test]
 fn filtered_domain_ids_drive_variable_height_placement() {
-    let ids = [71, 9, 104];
-    let offsets = [px(0.), px(40.), px(140.), px(200.)];
+    let ids = [None, Some(71), None, Some(9), Some(104)];
+    let index_of = |id| ids.iter().position(|&row| row == Some(id));
+    let offsets = [px(0.), px(80.), px(120.), px(200.), px(300.), px(360.)];
     let mut motion = DragMotionState::default();
     motion.update(
         Some((
@@ -172,12 +173,12 @@ fn filtered_domain_ids_drive_variable_height_placement() {
                 after: true,
             },
         )),
-        ids.into_iter(),
+        index_of,
         &offsets,
     );
-    assert!(motion.to == DragPlacement::new(0, 2, true));
-    assert_eq!(motion.offsets(0, &offsets), (0., 160.));
-    assert_eq!(motion.offsets(1, &offsets), (0., -40.));
+    assert!(motion.to == DragPlacement::new(1, 4, true));
+    assert_eq!(motion.offsets(1, &offsets), (0., 240.));
+    assert_eq!(motion.offsets(2, &offsets), (0., -40.));
     motion.update(
         Some((
             9,
@@ -186,10 +187,11 @@ fn filtered_domain_ids_drive_variable_height_placement() {
                 after: true,
             },
         )),
-        ids.into_iter(),
+        index_of,
         &offsets,
     );
-    assert!(motion.to.is_none());
+    // The unloaded row between the two IDs is a real insertion slot.
+    assert!(motion.to == DragPlacement::new(3, 1, true));
     motion.update(
         Some((
             104,
@@ -198,7 +200,7 @@ fn filtered_domain_ids_drive_variable_height_placement() {
                 after: false,
             },
         )),
-        ids.into_iter(),
+        index_of,
         &offsets,
     );
     assert!(motion.to.is_none());

@@ -100,6 +100,7 @@ fn monitor_types_change_applies_to_later_observed_captures() -> Result<()> {
         category: ContentCategory::All,
         group_id: None,
         limit: PAGE_SIZE,
+        offset: 0,
         generation: 1,
     })?;
     let items = next_snapshot(&events, 1);
@@ -149,6 +150,7 @@ fn app_filter_changes_apply_to_observed_sources() -> Result<()> {
         category: ContentCategory::All,
         group_id: None,
         limit: PAGE_SIZE,
+        offset: 0,
         generation: 1,
     })?;
     let items = next_snapshot(&events, 1);
@@ -186,6 +188,7 @@ fn app_filter_changes_apply_to_observed_sources() -> Result<()> {
         category: ContentCategory::All,
         group_id: None,
         limit: PAGE_SIZE,
+        offset: 0,
         generation: 2,
     })?;
     let items = next_snapshot(&events, 2);

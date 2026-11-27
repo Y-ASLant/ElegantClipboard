@@ -11,20 +11,19 @@ impl ClipboardView {
         self.reorder_pending = false;
         self.drop_target = None;
         self.card_drag_direction = 0;
-        let before = self.reorder_before.take();
         match result {
             Ok(()) if generation == self.history.generation => {
                 self.feedback_revision += 1;
-                if let Some(before) = before {
-                    let after: Vec<_> = self
-                        .history
-                        .items
-                        .iter()
-                        .map(|item| (item.id, history_row_height(item, self.display.value)))
-                        .collect();
-                    self.reorder_offsets = reorder_pixel_offsets(&before, &after);
+                self.reorder_offsets.clear();
+                for (index, item) in self.history.items.loaded() {
+                    if let Some(old_top) = self.reorder_before.get(&item.id) {
+                        let offset = old_top - f32::from(self.row_offsets[index]);
+                        if offset != 0. {
+                            self.reorder_offsets.insert(item.id, offset);
+                        }
+                    }
                 }
-                if self.history.items.iter().any(|item| item.id == from) {
+                if self.history.item_index(from).is_some() {
                     self.history.selected = Some(from);
                 }
                 self.feedback_task = Some(cx.spawn(async move |view, cx| {
@@ -44,6 +43,7 @@ impl ClipboardView {
                 self.is_error = true;
             }
         }
+        self.reorder_before.clear();
         true
     }
     pub(super) fn valid_drag(&self, drag: &HistoryDrag) -> bool {
@@ -57,6 +57,7 @@ impl ClipboardView {
                 .history
                 .items
                 .get(drag.card.card_index)
+                .and_then(Option::as_ref)
                 .is_some_and(|item| item.id == drag.id && item.is_pinned == drag.pinned)
     }
 
@@ -124,7 +125,12 @@ impl ClipboardView {
         let items = &self.history.items;
         self.drag_motion.hover_target(
             source,
-            |index| items.get(index).map(|item| (item.id, item.is_pinned)),
+            |index| {
+                items
+                    .get(index)
+                    .and_then(Option::as_ref)
+                    .map(|item| (item.id, item.is_pinned))
+            },
             &self.row_offsets,
             content_y,
             self.drop_target,
@@ -150,11 +156,9 @@ impl ClipboardView {
             self.is_error = true;
         } else if let Some(target) = target.filter(|target| {
             target.id != drag.id
-                && self
-                    .history
-                    .items
-                    .iter()
-                    .any(|item| item.id == target.id && item.is_pinned == drag.pinned)
+                && self.history.items.loaded().any(|(_, item)| {
+                    item.id == target.id && item.is_pinned == drag.pinned
+                })
         }) && self.send(
             Command::Reorder {
                 from: drag.id,
@@ -168,17 +172,18 @@ impl ClipboardView {
         ) {
             self.drag_motion.update(
                 Some((drag.id, target)),
-                self.history.items.iter().map(|item| item.id),
+                |id| self.history.item_index(id),
                 &self.row_offsets,
             );
             self.reorder_pending = true;
             self.drop_target = Some(target);
-            let mut preview_order: Vec<_> = self.history.items.iter().map(|item| item.id).collect();
-            if let Some(placement) = self.drag_motion.to {
-                let moved = preview_order.remove(placement.source);
-                preview_order.insert(placement.insertion, moved);
-            }
-            self.reorder_before = Some(preview_order);
+            let placement = self.drag_motion.to;
+            self.reorder_before.clear();
+            self.reorder_before
+                .extend(self.history.items.loaded().map(|(index, item)| {
+                    let shift = placement.map_or(0., |p| p.shift(index, &self.row_offsets));
+                    (item.id, f32::from(self.row_offsets[index]) + shift)
+                }));
         }
         cx.notify();
     }
@@ -237,15 +242,19 @@ impl ClipboardView {
                         this.card_drag_direction,
                     )
                     .and_then(|index| this.history.items.get(index))
+                    .and_then(Option::as_ref)
                     .and_then(|target| {
                         let source = if let Some(drag) = this.active_history_drag() {
                             if !this.valid_drag(drag) {
                                 return None;
                             }
-                            this.history.items.get(drag.card.card_index)?
+                            this.history.items.get(drag.card.card_index)?.as_ref()?
                         } else {
                             this.drag_source_id().and_then(|id| {
-                                this.history.items.iter().find(|item| item.id == id)
+                                this.history
+                                    .items
+                                    .loaded()
+                                    .find_map(|(_, item)| (item.id == id).then_some(item))
                             })?
                         };
                         (source.id != target.id && source.is_pinned == target.is_pinned).then_some(

@@ -200,7 +200,7 @@ impl ClipboardView {
                                 "history-virtual-list",
                                 self.row_sizes.clone(),
                                 |this, visible, window, cx| {
-                                    this.update_image_visible_range(visible.clone(), window, cx);
+                                    this.update_history_visible_range(visible.clone(), window, cx);
                                     visible
                                         .map(|index| this.render_row(index, window, cx))
                                         .collect()

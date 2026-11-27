@@ -28,6 +28,7 @@ fn imported_groups_can_be_browsed_and_reordered_without_mixing_default_history()
         category: ContentCategory::All,
         group_id: Some(group.id),
         limit: PAGE_SIZE,
+        offset: 0,
         generation: 1,
     })?;
     let rows = next_snapshot(&events, 1);
@@ -54,6 +55,7 @@ fn imported_groups_can_be_browsed_and_reordered_without_mixing_default_history()
         category: ContentCategory::All,
         group_id: None,
         limit: PAGE_SIZE,
+        offset: 0,
         generation: 2,
     })?;
     assert_eq!(next_snapshot(&events, 2)[0].id, default_item);
@@ -174,6 +176,7 @@ fn delete_group_preserves_items_and_rejects_stale_view() -> Result<()> {
         category: ContentCategory::All,
         group_id: Some(group.id),
         limit: PAGE_SIZE,
+        offset: 0,
         generation: 1,
     })?;
     assert_eq!(next_snapshot(&events, 1)[0].id, item);
@@ -194,6 +197,7 @@ fn delete_group_preserves_items_and_rejects_stale_view() -> Result<()> {
         category: ContentCategory::All,
         group_id: None,
         limit: PAGE_SIZE,
+        offset: 0,
         generation: 2,
     })?;
     assert_eq!(next_snapshot(&events, 2)[0].id, item);
@@ -230,6 +234,7 @@ fn move_to_group_updates_visible_history_and_rejects_stale_view() -> Result<()> 
         category: ContentCategory::All,
         group_id: Some(group.id),
         limit: PAGE_SIZE,
+        offset: 0,
         generation: 1,
     })?;
     assert_eq!(next_snapshot(&events, 1)[0].id, id);

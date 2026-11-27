@@ -240,6 +240,7 @@ pub(super) fn core_paste_variants(
         category: ContentCategory::All,
         group_id: None,
         limit: 100,
+        offset: 0,
         generation: 0,
     })?;
     assert!(

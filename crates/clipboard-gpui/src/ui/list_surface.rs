@@ -31,8 +31,11 @@ impl Render for ListSurface {
                         None
                     };
                     let layout = view.todo_layout.borrow();
-                    view.drag_motion
-                        .update(request, layout.ids.iter().copied(), &layout.offsets);
+                    view.drag_motion.update(
+                        request,
+                        |id| layout.ids.iter().position(|&row| row == id),
+                        &layout.offsets,
+                    );
                     drop(layout);
                     view.render_todos(cx).into_any_element()
                 } else {
@@ -45,7 +48,7 @@ impl Render for ListSurface {
                     };
                     view.drag_motion.update(
                         request,
-                        view.history.items.iter().map(|item| item.id),
+                        |id| view.history.item_index(id),
                         &view.row_offsets,
                     );
                     view.render_history_list(history_empty_state(view, cx), cx)

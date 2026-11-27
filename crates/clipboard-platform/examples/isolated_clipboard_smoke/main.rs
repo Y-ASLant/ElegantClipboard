@@ -175,6 +175,7 @@ fn main() -> anyhow::Result<()> {
             category: clipboard_core::ContentCategory::All,
             group_id: None,
             limit: clipboard_core::PAGE_SIZE,
+            offset: 0,
             generation: 90,
         })?;
         let deadline = Instant::now() + Duration::from_secs(8);
@@ -203,6 +204,7 @@ fn main() -> anyhow::Result<()> {
         category: clipboard_core::ContentCategory::All,
         group_id: None,
         limit: clipboard_core::PAGE_SIZE,
+        offset: 0,
         generation: 91,
     })?;
     println!("clipboard privacy exclusions ok");

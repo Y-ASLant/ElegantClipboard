@@ -81,7 +81,7 @@ impl ClipboardView {
         self.reset_selection();
         self.located = None;
         if let Some(reload) = self.history.set_group(group_id) {
-            self.scroll_to_top();
+            self.scroll_to_top_generation = Some(self.history.generation);
             self.arm_history_query(reload, false, cx);
         }
         window.focus(&self.list_focus, cx);

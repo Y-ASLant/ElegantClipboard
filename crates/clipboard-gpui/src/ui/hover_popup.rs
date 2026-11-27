@@ -43,10 +43,12 @@ impl ClipboardView {
             };
             prepared
         } else {
-            let Some(index) = self.history.items.iter().position(|item| item.id == id) else {
+            let Some(index) = self.history.item_index(id) else {
                 return;
             };
-            let item = &self.history.items[index];
+            let Some(item) = self.history.items[index].as_ref() else {
+                return;
+            };
             let image_path = match &result {
                 Ok(PreviewContent::Image(path)) => Some(path.clone()),
                 Ok(PreviewContent::Files(entries)) => single_file_image_path(entries),

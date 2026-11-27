@@ -50,6 +50,8 @@ use std::path::{Path, PathBuf};
 pub const MAX_TEXT_BYTES: usize = 1024 * 1024;
 pub const HISTORY_LIMIT: i64 = 10_000;
 pub const PAGE_SIZE: i64 = 100;
+/// Number of history rows fetched together by the desktop list and its startup snapshot.
+pub const HISTORY_PAGE_ROWS: usize = 256;
 /// 条目备注上限（字符数）。
 pub const MAX_NOTE_CHARS: usize = 2_000;
 
@@ -336,18 +338,33 @@ impl History {
         group_id: Option<i64>,
         category: ContentCategory,
     ) -> Result<Vec<ClipboardItem>> {
+        self.list_page_in_group(search, limit, 0, favorite_only, group_id, category)
+    }
+
+    /// Paged variant: `offset` applies only when `limit` is positive.
+    pub fn list_page_in_group(
+        &self,
+        search: &str,
+        limit: i64,
+        offset: i64,
+        favorite_only: bool,
+        group_id: Option<i64>,
+        category: ContentCategory,
+    ) -> Result<Vec<ClipboardItem>> {
+        // `limit <= 0` is the whole filtered result. A positive limit stays
+        // inside the old page bounds so existing callers keep a bounded query.
+        let limit = if limit <= 0 {
+            None
+        } else {
+            Some(limit.clamp(PAGE_SIZE, HISTORY_LIMIT))
+        };
         Ok(self.repo.list(QueryOptions {
             search: (!search.is_empty()).then(|| search.to_owned()),
             category_mask: category.mask(),
             favorite_only,
             group_id,
-            // `limit <= 0` is the whole filtered result. A positive limit stays
-            // inside the old page bounds so existing callers keep a bounded query.
-            limit: if limit <= 0 {
-                None
-            } else {
-                Some(limit.clamp(PAGE_SIZE, HISTORY_LIMIT))
-            },
+            limit,
+            offset: limit.map(|_| offset.max(0)),
             omit_text: true,
             ..Default::default()
         })?)

@@ -351,7 +351,13 @@ impl ClipboardView {
         {
             return;
         }
-        let Some(item) = self.history.items.iter().find(|item| item.id == id) else {
+        let Some(item) = self
+            .history
+            .items
+            .iter()
+            .flatten()
+            .find(|item| item.id == id)
+        else {
             return;
         };
         if text && !item.kind().is_some_and(|kind| kind.is_text_like()) {

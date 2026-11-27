@@ -159,6 +159,7 @@ fn buffered_captures_keep_filter_command_order_after_a_blocked_reply() -> Result
         category: ContentCategory::All,
         group_id: None,
         limit: 1000,
+        offset: 0,
         generation: 1,
     })?;
     for _ in 0..64 {

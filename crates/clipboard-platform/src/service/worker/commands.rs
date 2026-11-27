@@ -10,6 +10,7 @@ use std::path::Path;
 
 impl Worker {
     pub(in crate::service) fn handle(&mut self, command: Command) -> Result<()> {
+        let merges_rows = matches!(command, Command::Query { .. });
         match command {
             Command::Query {
                 search,
@@ -17,6 +18,7 @@ impl Worker {
                 category,
                 group_id,
                 limit,
+                offset,
                 generation,
             } => {
                 self.search = search;
@@ -24,6 +26,7 @@ impl Worker {
                 self.category = category;
                 self.group_id = group_id;
                 self.limit = limit;
+                self.offset = offset;
                 self.generation = generation;
             }
             Command::Capture(text) => {
@@ -135,7 +138,7 @@ impl Worker {
                     .edit_text(id, &expected_hash, &new_text, &self.images_dir)
                     .map_err(|error| error.to_string());
                 if matches!(&result, Ok(true)) {
-                    self.snapshot()?;
+                    self.snapshot_structural(false)?;
                 }
                 self.send_event(Event::TextEdited {
                     id,
@@ -528,7 +531,7 @@ impl Worker {
             }
             Command::Pause(paused) => return self.handle_pause(paused),
         }
-        self.snapshot()
+        self.snapshot_structural(!merges_rows)
     }
 
     fn handle_preview(&mut self, id: i64, generation: u64, hover: bool) -> Result<()> {

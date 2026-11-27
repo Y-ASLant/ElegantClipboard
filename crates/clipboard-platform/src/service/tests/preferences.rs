@@ -158,6 +158,7 @@ fn pause_acknowledgement_is_ordered_and_does_not_change_history() -> Result<()> 
         category: ContentCategory::All,
         group_id: None,
         limit: PAGE_SIZE,
+        offset: 0,
         generation: 1,
     })?;
     assert!(next_snapshot(&events, 1).is_empty());

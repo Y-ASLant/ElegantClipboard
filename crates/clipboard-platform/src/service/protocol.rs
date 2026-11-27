@@ -100,6 +100,7 @@ pub enum Command {
         category: ContentCategory,
         group_id: Option<i64>,
         limit: i64,
+        offset: i64,
         generation: u64,
     },
     PrepareExternalDrag {
@@ -436,6 +437,8 @@ pub enum Event {
     Snapshot {
         items: Vec<ClipboardItem>,
         total: i64,
+        offset: i64,
+        structural: bool,
         generation: u64,
     },
     Status(String),

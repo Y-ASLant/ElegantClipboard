@@ -76,25 +76,27 @@ fn sequence_selection_keeps_click_order_and_appends_shift_ranges() -> anyhow::Re
         history.capture(text)?;
     }
     let rows = history.list("", PAGE_SIZE, false)?;
+    let mut items = HistoryItems::default();
+    items.merge(rows.clone(), rows.len(), 0, true);
     let [first, second, third, last] = rows.as_slice() else {
         panic!("expected four history rows");
     };
     let mut selected = IndexSet::new();
 
     for id in [last.id, first.id, second.id] {
-        assert!(toggle_batch_mark(&mut selected, &rows, None, id));
+        assert!(toggle_batch_mark(&mut selected, &items, None, id));
     }
     assert!(selected.iter().copied().eq([last.id, first.id, second.id]));
 
     // Rechecking the first mark puts it last without moving the other two.
-    toggle_batch_mark(&mut selected, &rows, None, last.id);
-    toggle_batch_mark(&mut selected, &rows, None, last.id);
+    toggle_batch_mark(&mut selected, &items, None, last.id);
+    toggle_batch_mark(&mut selected, &items, None, last.id);
     assert!(selected.iter().copied().eq([first.id, second.id, last.id]));
 
     selected.clear();
-    toggle_batch_mark(&mut selected, &rows, None, last.id);
-    toggle_batch_mark(&mut selected, &rows, None, second.id);
-    toggle_batch_mark(&mut selected, &rows, Some(last.id), first.id);
+    toggle_batch_mark(&mut selected, &items, None, last.id);
+    toggle_batch_mark(&mut selected, &items, None, second.id);
+    toggle_batch_mark(&mut selected, &items, Some(last.id), first.id);
     assert!(
         selected
             .iter()
@@ -103,14 +105,14 @@ fn sequence_selection_keeps_click_order_and_appends_shift_ranges() -> anyhow::Re
     );
 
     selected.clear();
-    toggle_batch_mark(&mut selected, &rows, Some(i64::MAX), second.id);
+    toggle_batch_mark(&mut selected, &items, Some(i64::MAX), second.id);
     assert!(!toggle_batch_mark(
         &mut selected,
-        &rows,
+        &items,
         Some(second.id),
         i64::MAX
     ));
-    toggle_batch_mark(&mut selected, &rows, Some(second.id), last.id);
+    toggle_batch_mark(&mut selected, &items, Some(second.id), last.id);
     assert!(selected.iter().copied().eq([second.id, third.id, last.id]));
     Ok(())
 }
@@ -151,8 +153,8 @@ fn unchanged_scope_keeps_the_in_flight_generation() {
     assert!(state.set_group(Some(9)).is_none());
     assert_eq!(state.generation, generation);
     assert!(state.loading);
-    assert!(!state.apply(vec![], 0, generation - 1));
-    assert!(state.apply(vec![], 0, generation));
+    assert!(!state.apply(vec![], 0, 0, true, generation - 1));
+    assert!(state.apply(vec![], 0, 0, true, generation));
     assert!(!state.loading);
 
     assert!(state.set_category(ContentCategory::Text).is_some());
@@ -160,7 +162,7 @@ fn unchanged_scope_keeps_the_in_flight_generation() {
     assert!(state.set_category(ContentCategory::Text).is_none());
     assert_eq!(state.generation, generation);
     assert!(state.loading);
-    assert!(state.apply(vec![], 0, generation));
+    assert!(state.apply(vec![], 0, 0, true, generation));
 
     assert!(state.set_favorite_filter(true).is_some());
     assert!(state.favorite_only());
@@ -184,17 +186,17 @@ fn filter_change_rejects_previous_results() {
     super::settle(state.set_favorite_filter(true));
     assert!(state.favorite_only());
     assert_eq!(state.selected, None);
-    assert!(!state.apply(vec![], 100, old));
+    assert!(!state.apply(vec![], 100, 0, true, old));
     super::settle(state.begin_search());
     assert!(state.favorite_only());
-    assert!(state.apply(vec![], 0, state.generation));
+    assert!(state.apply(vec![], 0, 0, true, state.generation));
     super::settle(state.set_favorite_filter(false));
     assert!(!state.favorite_only());
     assert!(state.loading);
     let old = state.generation;
     super::settle(state.set_group(Some(7)));
     assert_eq!(state.group_id(), Some(7));
-    assert!(!state.apply(vec![], 1, old));
+    assert!(!state.apply(vec![], 1, 0, true, old));
     assert!(!state.fail_query(old));
     assert!(state.loading);
     assert!(state.fail_query(state.generation));
@@ -205,7 +207,7 @@ fn filter_change_rejects_previous_results() {
     super::settle(state.set_category(ContentCategory::Other));
     assert_eq!(state.category(), ContentCategory::Other);
     assert!(!state.favorite_only());
-    assert!(!state.apply(vec![], 0, old));
+    assert!(!state.apply(vec![], 0, 0, true, old));
     super::settle(state.set_favorite_filter(true));
     assert_eq!(state.category(), ContentCategory::All);
     assert!(state.favorite_only());
@@ -217,7 +219,7 @@ fn filter_change_rejects_previous_results() {
     assert_eq!(state.group_id(), None);
     assert!(!state.favorite_only());
     assert_eq!(state.category(), ContentCategory::All);
-    assert!(!state.apply(vec![], 100, old));
+    assert!(!state.apply(vec![], 100, 0, true, old));
 }
 
 #[test]
@@ -231,7 +233,7 @@ fn category_and_favorite_filters_preserve_group_selection() -> anyhow::Result<()
     let mut state = HistoryState::default();
 
     super::settle(state.set_group(Some(group.id)));
-    assert!(state.apply(items, 1, state.generation));
+    assert!(state.apply(items, 1, 0, true, state.generation));
     assert_eq!(state.select_index(0), Some(0));
     assert_eq!(state.selected, Some(id));
     assert_eq!(state.group_id(), Some(group.id));
@@ -307,7 +309,7 @@ fn group_tabs_and_search_compose_without_leaking_rows_or_selection() -> anyhow::
         actual.sort_unstable();
         assert_eq!(actual, expected);
         assert_eq!(count, expected.len() as i64);
-        assert!(state.apply(rows, count, state.generation));
+        assert!(state.apply(rows, count, 0, true, state.generation));
         assert!(state.selected.is_none_or(|id| expected.contains(&id)));
         Ok(())
     };
@@ -316,12 +318,13 @@ fn group_tabs_and_search_compose_without_leaking_rows_or_selection() -> anyhow::
     super::settle(state.set_category(ContentCategory::Text));
     super::settle(state.set_group(Some(first)));
     query(&mut state, "needle", &ids[1..2])?;
-    let stale_rows = state.items.clone();
+    let stale_rows = state.items.loaded().map(|(_, row)| row.clone()).collect();
     let stale_generation = state.generation;
     super::settle(state.set_group(Some(second)));
     assert_eq!(state.selected, None);
-    assert!(state.items.is_empty());
-    assert!(!state.apply(stale_rows, 1, stale_generation));
+    // Rows of the previous group stay visible until the new snapshot swaps them.
+    assert!(!state.items.is_empty());
+    assert!(!state.apply(stale_rows, 1, 0, true, stale_generation));
     assert!(!state.fail_query(stale_generation));
     query(&mut state, "needle", &ids[4..5])?;
     super::settle(state.set_category(ContentCategory::Other));
@@ -366,10 +369,10 @@ fn late_search_results_are_rejected_and_selection_follows_ids() -> anyhow::Resul
     let a = history.capture("alpha")?.unwrap();
     let b = history.capture("beta")?.unwrap();
     let mut state = HistoryState::default();
-    state.apply(history.list("", PAGE_SIZE, false)?, 2, 0);
+    state.apply(history.list("", PAGE_SIZE, false)?, 2, 0, true, 0);
     state.selected = Some(a);
     history.capture("alpha")?;
-    state.apply(history.list("", PAGE_SIZE, false)?, 2, 0);
+    state.apply(history.list("", PAGE_SIZE, false)?, 2, 0, true, 0);
     assert_eq!(state.selected, Some(a));
     assert_eq!(state.select_relative(1), Some(1));
     assert_eq!(state.selected, Some(b));
@@ -381,16 +384,154 @@ fn late_search_results_are_rejected_and_selection_follows_ids() -> anyhow::Resul
     assert_eq!(state.select_index(0), Some(0));
     assert_eq!(state.selected, Some(a));
     super::settle(state.begin_search());
-    assert!(!state.apply(history.list("", PAGE_SIZE, false)?, 2, 0));
-    assert!(state.items.is_empty());
-    assert!(state.apply(history.list("beta", PAGE_SIZE, false)?, 1, 1));
+    assert!(!state.apply(history.list("", PAGE_SIZE, false)?, 2, 0, true, 0));
+    // A pending reload keeps the stale rows instead of blanking the list.
+    assert!(!state.items.is_empty());
+    assert!(state.apply(history.list("beta", PAGE_SIZE, false)?, 1, 0, true, 1));
     assert_eq!(state.selected, Some(b));
     history.delete(b)?;
-    state.apply(vec![], 0, 1);
+    state.apply(vec![], 0, 0, true, 1);
     assert_eq!(state.select_relative(1), None);
     assert_eq!(state.select_index(0), None);
     assert_eq!(state.selected, None);
     Ok(())
+}
+
+fn paging_item(id: i64) -> clipboard_core::database::ClipboardItem {
+    clipboard_core::database::ClipboardItem {
+        id,
+        content_type: "text".into(),
+        text_content: None,
+        html_content: None,
+        rtf_content: None,
+        image_path: None,
+        file_paths: None,
+        file_payload: None,
+        content_hash: format!("paging-{id}"),
+        semantic_hash: format!("paging-{id}"),
+        preview: None,
+        byte_size: 0,
+        image_width: None,
+        image_height: None,
+        is_pinned: false,
+        is_favorite: false,
+        favorite_order: 0,
+        sort_order: 0,
+        created_at: String::new(),
+        updated_at: String::new(),
+        access_count: 0,
+        last_accessed_at: None,
+        char_count: None,
+        source_app_name: None,
+        source_app_icon: None,
+        note: None,
+        group_id: None,
+        formats: Vec::new(),
+    }
+}
+
+#[test]
+fn continuation_pages_merge_while_structural_snapshots_drop_other_slots() {
+    let mut state = HistoryState::default();
+    state.apply(vec![paging_item(1), paging_item(2)], 6, 0, false, 0);
+    // A deeper page merges: slots outside both pages survive.
+    state.apply(vec![paging_item(5), paging_item(6)], 6, 4, false, 0);
+    assert_eq!(state.items.len(), 6);
+    assert!(state.items[0].is_some());
+    assert!(state.items[2].is_none());
+    assert_eq!(state.items[4].as_ref().unwrap().id, 5);
+    // A structural refresh discards everything outside its own page: captures
+    // shift positions, so the old slot mapping is untrustworthy.
+    state.apply(vec![paging_item(7)], 6, 0, true, 0);
+    assert_eq!(state.items.len(), 6);
+    assert_eq!(state.items[0].as_ref().unwrap().id, 7);
+    assert!(state.items.iter().skip(1).all(Option::is_none));
+}
+
+#[test]
+fn first_reply_of_a_new_view_replaces_the_previous_views_slots() {
+    let mut state = HistoryState::default();
+    state.apply(vec![paging_item(1), paging_item(2)], 4, 0, false, 0);
+    // The same view paging deeper merges into the surviving slots.
+    state.apply(vec![paging_item(3)], 4, 2, false, 0);
+    assert!(state.items.iter().flatten().any(|item| item.id == 1));
+    super::settle(state.set_group(Some(9)));
+    // The new view's first page is non-structural yet must not merge: row zero
+    // of the old view has no relationship with row zero of the new one.
+    state.apply(vec![paging_item(8)], 4, 0, false, state.generation);
+    assert!(!state.items.iter().flatten().any(|item| item.id == 1));
+    assert!(!state.items.iter().flatten().any(|item| item.id == 3));
+    assert!(state.items.iter().skip(1).all(Option::is_none));
+}
+
+#[test]
+fn resize_grows_slots_when_the_total_increases_between_pages() {
+    let mut state = HistoryState::default();
+    state.apply(vec![paging_item(1)], 2, 0, false, 0);
+    assert_eq!(state.items.len(), 2);
+    // A capture arrived before the answer: the total grows and loaded rows keep their slots.
+    state.apply(vec![paging_item(2)], 4, 1, false, 0);
+    assert_eq!(state.items.len(), 4);
+    assert_eq!(state.items[0].as_ref().unwrap().id, 1);
+    assert_eq!(state.items[1].as_ref().unwrap().id, 2);
+}
+
+#[test]
+fn selection_drops_into_unloaded_rows_without_stalling_keyboard_scroll() {
+    let mut state = HistoryState::default();
+    state.apply(vec![paging_item(1)], 4, 0, false, 0);
+    assert_eq!(state.select_relative(1), Some(1));
+    // Row one is not paged in: scrolling reaches it, the selection waits for data.
+    assert_eq!(state.selected, None);
+    assert_eq!(state.select_relative(1), Some(2));
+    // Once the page arrives the next keypress selects the row as usual.
+    state.apply(vec![paging_item(2)], 4, 2, false, 0);
+    assert_eq!(state.selected, Some(2));
+}
+
+#[test]
+fn jumping_across_history_bounds_metadata_and_rejects_departed_pages() {
+    use clipboard_core::HISTORY_PAGE_ROWS as PAGE;
+
+    let mut state = HistoryState::default();
+    let total = 60_000;
+    for page in (0..8).chain([56, 110, 198]) {
+        let start = page * PAGE;
+        state.items.watch(start..start + PAGE);
+        let rows = (start..start + PAGE)
+            .map(|i| paging_item(i as i64))
+            .collect();
+        assert!(state.apply(rows, total, start, false, 0));
+        assert!(state.items.loaded().count() <= 4 * PAGE);
+        assert!(state.items.metadata_capacity() <= 8 * PAGE);
+        assert_eq!(state.item_index(start as i64), Some(start));
+    }
+
+    let last = 198 * PAGE;
+    assert_eq!(state.items.len(), total as usize);
+    assert!(state.items[0].is_none());
+    assert_eq!(state.items.known_ids().next(), Some(0));
+    assert!(!state.apply(vec![paging_item(-1)], 1, 0, false, 0));
+    assert_eq!(state.item_index(last as i64), Some(last));
+    assert_eq!(state.total, total);
+
+    // Marks and selection use IDs rather than retaining the marked metadata.
+    let mut marks = IndexSet::new();
+    assert!(toggle_batch_mark(&mut marks, &state.items, None, 0));
+    assert!(toggle_batch_mark(
+        &mut marks,
+        &state.items,
+        None,
+        last as i64
+    ));
+    assert!(marks.iter().copied().eq([0, last as i64]));
+    assert!(state.apply_deleted(0));
+    assert_eq!(state.item_index(last as i64), Some(last - 1));
+
+    state.items.watch(0..PAGE);
+    assert!(state.apply(vec![paging_item(1)], total - 1, 0, false, 0));
+    assert_eq!(state.item_index(1), Some(0));
+    assert!(state.items[last - 1].is_none());
 }
 
 #[test]

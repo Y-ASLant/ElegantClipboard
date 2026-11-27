@@ -49,6 +49,7 @@ fn search_snapshots_keep_context_without_retaining_bodies_or_changing_full_reads
         category: ContentCategory::All,
         group_id: None,
         limit: PAGE_SIZE,
+        offset: 0,
         generation: 1,
     })?;
     let rows = next_snapshot(&events, 1);
@@ -98,6 +99,7 @@ fn search_snapshots_keep_context_without_retaining_bodies_or_changing_full_reads
         category: ContentCategory::All,
         group_id: None,
         limit: PAGE_SIZE,
+        offset: 0,
         generation: 4,
     })?;
     let rows = next_snapshot(&events, 4);

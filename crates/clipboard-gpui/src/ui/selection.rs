@@ -14,7 +14,7 @@ impl ClipboardView {
         cx.notify();
     }
 
-    /// Flip marks on the loaded list; stay in multi-select.
+    /// Flip marks on visited rows, including pages whose metadata was evicted.
     pub(super) fn invert_batch_selection(&mut self, cx: &mut Context<Self>) {
         if self.batch_pending || self.history.loading || self.history.items.is_empty() {
             return;
@@ -23,8 +23,7 @@ impl ClipboardView {
         self.selected_ids = self
             .history
             .items
-            .iter()
-            .map(|item| item.id)
+            .known_ids()
             .filter(|id| !self.selected_ids.contains(id))
             .collect();
         self.selection_anchor = None;
@@ -83,7 +82,7 @@ impl ClipboardView {
             || self.batch_pending
             || self.paste_state.pending()
             || self.editor.id.is_some()
-            || !self.history.items.iter().any(|item| item.id == id)
+            || !self.history.items.known_ids().any(|known| known == id)
         {
             return;
         }
@@ -129,7 +128,7 @@ impl ClipboardView {
         // Seed with the focused row when nothing is marked yet.
         if self.selected_ids.is_empty()
             && let Some(id) = self.history.selected
-            && self.history.items.iter().any(|item| item.id == id)
+            && self.history.items.known_ids().any(|known| known == id)
         {
             self.selected_ids.insert(id);
             self.selection_anchor = Some(id);
@@ -147,8 +146,8 @@ impl ClipboardView {
         let ids: Vec<_> = self
             .history
             .items
-            .iter()
-            .filter_map(|item| self.selected_ids.contains(&item.id).then_some(item.id))
+            .known_ids()
+            .filter(|id| self.selected_ids.contains(id))
             .collect();
         if ids.len() < 2 {
             return;

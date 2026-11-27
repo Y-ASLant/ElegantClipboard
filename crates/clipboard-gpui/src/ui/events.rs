@@ -58,8 +58,17 @@ impl ClipboardView {
             Event::Snapshot {
                 items,
                 total,
+                offset,
+                structural,
                 generation,
-            } => self.apply_snapshot(items, total, generation, cx),
+            } => self.apply_snapshot(
+                items,
+                total,
+                usize::try_from(offset).unwrap_or(0),
+                structural,
+                generation,
+                cx,
+            ),
             Event::Preview {
                 id,
                 generation,

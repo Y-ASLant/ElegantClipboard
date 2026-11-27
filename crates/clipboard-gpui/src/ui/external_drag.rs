@@ -490,12 +490,7 @@ impl ClipboardView {
         if !self.todo_reorder_pending {
             self.todo_drop_target = None;
         }
-        if let Some((items, total, generation)) = self.drag_snapshot.take()
-            && !self.reorder_pending
-        {
-            self.apply_snapshot(items, total, generation, cx);
-        }
-        self.finish_drag_deletions(cx);
+        self.finish_drag_updates(cx);
         cx.notify();
     }
 }

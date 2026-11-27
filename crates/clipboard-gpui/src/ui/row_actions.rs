@@ -223,7 +223,12 @@ impl ClipboardView {
                         || this.batch_pending
                         || this.batch_mode
                         || this.paste_state.pending()
-                        || !this.history.items.iter().any(|item| item.id == id)
+                        || !this
+                            .history
+                            .items
+                            .iter()
+                            .flatten()
+                            .any(|item| item.id == id)
                     {
                         return;
                     }

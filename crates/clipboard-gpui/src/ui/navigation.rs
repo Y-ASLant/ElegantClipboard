@@ -1,6 +1,9 @@
 pub(super) const HISTORY_REPLY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 use super::*;
+use crate::state::HistoryItems;
+use clipboard_core::HISTORY_PAGE_ROWS;
+use std::ops::Range;
 pub(super) fn history_row_height(
     item: &clipboard_core::database::ClipboardItem,
     display: DisplayPreference,
@@ -26,7 +29,7 @@ pub(super) fn history_row_height(
 }
 
 pub(super) fn history_row_layout(
-    items: &[clipboard_core::database::ClipboardItem],
+    items: &HistoryItems,
     display: DisplayPreference,
 ) -> (Rc<Vec<gpui_kit::Size<Pixels>>>, Vec<Pixels>) {
     let mut sizes = Vec::with_capacity(items.len());
@@ -34,8 +37,14 @@ pub(super) fn history_row_layout(
     let mut top = px(0.);
     offsets.push(top);
     let trailing = px(visual::last_row_extra(display.card_density));
+    // Rows beyond the loaded pages are at least one preview line tall: the
+    // estimate self-corrects as pages arrive, and the error amortizes across
+    // the position independent of scroll direction.
+    let gap = px(visual::row_height(display.card_density, 1));
     for (index, item) in items.iter().enumerate() {
-        let mut height = px(history_row_height(item, display));
+        let mut height = item
+            .as_ref()
+            .map_or(gap, |item| px(history_row_height(item, display)));
         if index + 1 == items.len() {
             height += trailing;
         }
@@ -82,7 +91,77 @@ pub(super) fn centered_row_scroll(
     let furthest = (*offsets.last()? - viewport_height).max(px(0.));
     Some((top - slack * 0.5).max(px(0.)).min(furthest))
 }
+/// Rows of lookahead beyond the visible edge before a page fetch triggers.
+const HISTORY_PREFETCH_ROWS: usize = 32;
+
 impl ClipboardView {
+    /// Fetch every grid page intersecting the visible window that still has
+    /// unloaded slots. `pending_pages` deduplicates in-flight requests; it is
+    /// scoped to the view generation because slots reset when the view swaps.
+    pub(super) fn request_history_pages(&mut self, cx: &mut Context<Self>) {
+        if !self.history.can_page() {
+            return;
+        }
+        // Read the settled scroll geometry, not the renderer's measurement row.
+        let visible = self.visible_history_rows();
+        if visible.is_empty() {
+            return;
+        }
+        let total = self.history.items.len();
+        let generation = self.history.generation;
+        if self.paging_generation != generation {
+            self.paging_generation = generation;
+            self.pending_pages.clear();
+        }
+        let first = visible.start.saturating_sub(HISTORY_PREFETCH_ROWS);
+        let last = visible.end.saturating_add(HISTORY_PREFETCH_ROWS).min(total);
+        if first >= last {
+            return;
+        }
+        self.history.items.watch(first..last);
+        for page in (first / HISTORY_PAGE_ROWS)..=(last - 1) / HISTORY_PAGE_ROWS {
+            if self.pending_pages.contains(&page) {
+                continue;
+            }
+            let start = page * HISTORY_PAGE_ROWS;
+            let end = ((page + 1) * HISTORY_PAGE_ROWS).min(total);
+            if !self.history.items.wants_page(start) {
+                break;
+            }
+            if self.drag_snapshots.has_page(start, generation)
+                || self.history.items.loaded_range(start..end).count() == end - start
+            {
+                continue;
+            }
+            if self.send(
+                Command::Query {
+                    search: if self.located.is_some() {
+                        String::new()
+                    } else {
+                        self.search.read(cx).value().to_string()
+                    },
+                    limit: (end - start) as i64,
+                    offset: start as i64,
+                    favorite_only: self.history.favorite_only(),
+                    category: self.history.category(),
+                    group_id: self.history.group_id(),
+                    generation,
+                },
+                cx,
+            ) {
+                self.pending_pages.insert(page);
+            }
+        }
+    }
+
+    /// A reply covering `[offset, offset + len)` retired those page requests.
+    pub(super) fn retire_history_pages(&mut self, offset: usize, len: usize) {
+        let last_page = offset.saturating_add(len.saturating_sub(1)) / HISTORY_PAGE_ROWS;
+        for page in offset / HISTORY_PAGE_ROWS..=last_page {
+            self.pending_pages.remove(&page);
+        }
+    }
+
     pub(super) fn query(&mut self, cx: &mut Context<Self>) -> bool {
         let generation = self.history.generation;
         if !self.send(
@@ -93,7 +172,8 @@ impl ClipboardView {
                 } else {
                     self.search.read(cx).value().to_string()
                 },
-                limit: 0,
+                limit: HISTORY_PAGE_ROWS as i64,
+                offset: 0,
                 favorite_only: self.history.favorite_only(),
                 category: self.history.category(),
                 group_id: self.history.group_id(),
@@ -125,6 +205,8 @@ impl ClipboardView {
         if !debounce {
             if self.query(cx) {
                 self.arm_history_reply_timeout(generation, cx);
+            } else {
+                self.pending_pages.clear();
             }
             return;
         }
@@ -168,6 +250,7 @@ impl ClipboardView {
         }
         self.history.fail_query(generation);
         self.history_reply_missed = true;
+        self.pending_pages.clear();
         self.set_feedback_message(
             tr(
                 self.language,
@@ -236,8 +319,8 @@ impl ClipboardView {
         } else {
             self.history.set_favorite_filter(true)
         };
-        self.scroll_to_top();
         if let Some(reload) = reload {
+            self.scroll_to_top_generation = Some(self.history.generation);
             self.arm_history_query(reload, false, cx);
         } else if self.history_needs_reload() {
             self.reload_current_history(cx);
@@ -260,8 +343,7 @@ impl ClipboardView {
         self.close_history_confirmation(window, cx);
         self.group_move_id = None;
         self.located = Some(id);
-        // Captured before the reload below empties the filtered list.
-        self.located_matches = self.history.items.iter().map(|item| item.id).collect();
+        self.located_matches = self.history.items.known_ids().collect();
         let reload = match self.history.set_category(ContentCategory::All) {
             Some(reload) => reload,
             None => self.history.begin_search(),
@@ -275,12 +357,17 @@ impl ClipboardView {
 
     /// Select the row a pending `locate_in_timeline` asked for and centre it.
     pub(super) fn finish_locate(&mut self) {
-        let Some(id) = self.locate_id.take() else {
+        let Some(id) = self.locate_id else {
             return;
         };
-        let Some(index) = self.history.items.iter().position(|item| item.id == id) else {
+        if self.located != Some(id) {
+            self.locate_id = None;
+            return;
+        }
+        let Some(index) = self.history.item_index(id) else {
             return;
         };
+        self.locate_id = None;
         self.history.selected = Some(id);
         self.center_row(index);
     }
@@ -298,10 +385,8 @@ impl ClipboardView {
     fn located_rows(&self) -> Vec<(usize, i64)> {
         self.history
             .items
-            .iter()
-            .enumerate()
-            .filter(|(_, item)| self.located_matches.contains(&item.id))
-            .map(|(index, item)| (index, item.id))
+            .known_rows()
+            .filter(|(_, id)| self.located_matches.contains(id))
             .collect()
     }
 
@@ -426,9 +511,7 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.history.items.first().map(|item| item.id) == self.history.selected
-            && self.history.selected.is_some()
-        {
+        if self.history.items.id_at(0) == self.history.selected && self.history.selected.is_some() {
             self.search
                 .update(cx, |search, cx| search.focus(window, cx));
         } else {
@@ -471,13 +554,20 @@ impl ClipboardView {
         cx.notify();
     }
 
+    fn visible_history_rows(&self) -> Range<usize> {
+        let height = self.scroll.bounds().size.height;
+        if height <= px(0.) {
+            return 0..0;
+        }
+        let scroll_y = self.scroll.offset().y;
+        let (top, _) = history_top_row(&self.row_offsets, scroll_y);
+        let bottom = -scroll_y + height;
+        let end = self.row_offsets.partition_point(|offset| *offset < bottom);
+        top..end.min(self.history.items.len())
+    }
+
     pub(super) fn page_step(&self) -> isize {
-        let (top, _) = history_top_row(&self.row_offsets, self.scroll.offset().y);
-        let viewport_end = -self.scroll.offset().y + self.scroll.bounds().size.height;
-        let visible = self
-            .row_offsets
-            .partition_point(|offset| *offset < viewport_end);
-        visible.saturating_sub(top + 2).max(1) as isize
+        self.visible_history_rows().len().saturating_sub(2).max(1) as isize
     }
 }
 #[cfg(test)]

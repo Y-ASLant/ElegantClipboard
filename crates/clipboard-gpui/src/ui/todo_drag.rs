@@ -115,7 +115,7 @@ impl ClipboardView {
             let layout = self.todo_layout.borrow();
             self.drag_motion.update(
                 Some((drag.id, target)),
-                layout.ids.iter().copied(),
+                |id| layout.ids.iter().position(|&row| row == id),
                 &layout.offsets,
             );
             drop(layout);

@@ -144,6 +144,7 @@ fn invalid_history_row_reports_startup_error() -> Result<()> {
         category: ContentCategory::All,
         group_id: None,
         limit: PAGE_SIZE,
+        offset: 0,
         generation: 7,
     })?;
     wait_for(

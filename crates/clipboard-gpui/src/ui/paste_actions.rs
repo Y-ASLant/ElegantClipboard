@@ -53,7 +53,13 @@ impl ClipboardView {
     }
 
     pub(super) fn start_favorite_flash(&mut self, id: i64, cx: &mut Context<Self>) {
-        let Some(item) = self.history.items.iter().find(|item| item.id == id) else {
+        let Some(item) = self
+            .history
+            .items
+            .iter()
+            .flatten()
+            .find(|item| item.id == id)
+        else {
             return;
         };
         if !copy_flash::shows_favorite_flash(item.is_favorite) {

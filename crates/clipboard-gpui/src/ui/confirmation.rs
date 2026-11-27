@@ -22,7 +22,7 @@ impl ClipboardView {
         if self.history.loading
             || self.batch_pending
             || self.batch_mode
-            || !self.history.items.iter().any(|item| item.id == id)
+            || !self.history.items.known_ids().any(|known| known == id)
         {
             return;
         }
@@ -61,7 +61,7 @@ impl ClipboardView {
             return false;
         }
         match kind {
-            HistoryConfirmation::Item(id) => self.history.items.iter().any(|item| item.id == id),
+            HistoryConfirmation::Item(id) => self.history.items.known_ids().any(|known| known == id),
             other => other.matches_scope(self.history.group_id(), !self.selected_ids.is_empty()),
         }
     }
