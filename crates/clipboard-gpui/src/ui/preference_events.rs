@@ -49,11 +49,15 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        let previous_size = self.fonts.value.card_font_size;
         self.acknowledge_save(
             result,
             |this| &mut this.fonts,
             ("字体保存失败", "Failed to save fonts"),
         );
+        if self.fonts.value.card_font_size != previous_size {
+            self.rebuild_rows_keeping_scroll();
+        }
         crate::design_system::set_fonts(self.fonts.value.clone(), cx);
         apply_theme(self.theme, window, cx);
         cx.refresh_windows();

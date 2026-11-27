@@ -19,6 +19,9 @@ pub struct InterceptedText {
     pub(crate) scan_code: u16,
     #[cfg(windows)]
     pub(crate) extended: bool,
+    /// Printable ASCII translated at key-down, for search without native focus.
+    #[cfg(windows)]
+    pub search_character: Option<char>,
     /// Whether this is Space with no shortcut modifiers.
     pub unmodified_space: bool,
     /// Whether the key is an auto-repeat of an already pressed key.

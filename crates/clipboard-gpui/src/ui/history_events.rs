@@ -373,6 +373,7 @@ impl ClipboardView {
             self.message.clear();
             self.feedback_pending = false;
         }
+        self.row_search = self.history_search.clone();
         self.reconcile_history_rows(cx);
         self.finish_locate();
     }

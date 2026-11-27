@@ -181,16 +181,13 @@ impl ClipboardView {
             tracing::debug!(id, "Hover source miss: history row not found");
             return false;
         };
-        let Some(offset) = self.row_offsets.get(index) else {
+        let Some(row) = self.history_hover_row(index) else {
             tracing::debug!(id, index, "Hover source miss: history offset missing");
             return false;
         };
-        let top = viewport.top() + *offset + self.scroll.offset().y;
-        let bottom = top
-            + self.history.items[index].as_ref().map_or_else(
-                || self.row_sizes.get(index).map_or(px(0.), |size| size.height),
-                |item| px(history_row_height(item, self.display.value)),
-            );
+        let origin = viewport.top() + self.scroll.offset().y;
+        let top = origin + row.start;
+        let bottom = origin + row.end;
         let hit = px(y) >= top && px(y) < bottom;
         if !hit {
             tracing::debug!(

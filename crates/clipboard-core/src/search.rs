@@ -1,53 +1,53 @@
 use std::ops::Range;
 
-/// Non-overlapping UTF-8 ranges for a literal term. A limit lets callers find
-/// the first match in a long body without collecting every occurrence.
-fn matching_ranges(text: &str, search: &str, limit: usize) -> Vec<Range<usize>> {
-    if search.trim().is_empty() || limit == 0 {
-        return Vec::new();
-    }
-    let needle: Vec<char> = search.chars().collect();
-    let mut ranges = Vec::new();
+/// Non-overlapping, case-insensitive literal matches with UTF-8 byte offsets.
+fn matching_ranges<'a>(text: &'a str, search: &'a str) -> impl Iterator<Item = Range<usize>> + 'a {
     let mut chars = text.char_indices().peekable();
-    while let Some((start, first)) = chars.next() {
-        let mut candidate = chars.clone();
-        let mut end = start + first.len_utf8();
-        let matched = first.to_lowercase().eq(needle[0].to_lowercase())
-            && needle.iter().skip(1).all(|expected| {
-                if let Some((byte, actual)) = candidate.next()
-                    && actual.to_lowercase().eq(expected.to_lowercase())
-                {
-                    end = byte + actual.len_utf8();
-                    true
-                } else {
-                    false
-                }
-            });
-        if matched {
-            ranges.push(start..end);
-            if ranges.len() == limit {
-                break;
+    let first_needle = search.chars().next().filter(|_| !search.trim().is_empty());
+    std::iter::from_fn(move || {
+        let first_needle = first_needle?;
+        while let Some((start, first)) = chars.next() {
+            let mut candidate = chars.clone();
+            let mut end = start + first.len_utf8();
+            let matched = first.to_lowercase().eq(first_needle.to_lowercase())
+                && search.chars().skip(1).all(|expected| {
+                    if let Some((byte, actual)) = candidate.next()
+                        && actual.to_lowercase().eq(expected.to_lowercase())
+                    {
+                        end = byte + actual.len_utf8();
+                        true
+                    } else {
+                        false
+                    }
+                });
+            if matched {
+                chars = candidate;
+                return Some(start..end);
             }
-            chars = candidate;
         }
-    }
-    ranges
+        None
+    })
 }
 
 /// Search matches in a card preview, with byte ranges safe for styled text.
 pub fn search_highlight_ranges(text: &str, search: &str) -> Vec<Range<usize>> {
-    matching_ranges(text, search, usize::MAX)
+    matching_ranges(text, search).collect()
+}
+
+/// First literal match, without allocating all highlight ranges.
+pub fn first_search_match(text: &str, search: &str) -> Option<Range<usize>> {
+    matching_ranges(text, search).next()
 }
 
 /// True when the saved preview does not already show the term.
 pub(crate) fn search_excerpt_needed(preview: &str, search: &str) -> bool {
-    matching_ranges(preview, search, 1).is_empty() && !search.trim().is_empty()
+    !search.trim().is_empty() && first_search_match(preview, search).is_none()
 }
 
 /// Show the first matching part of a full text record when its saved preview
 /// does not contain the term. Keep the match near the start of a two-line card.
 pub fn search_excerpt(full: &str, preview: &str, search: &str) -> Option<String> {
-    if !matching_ranges(preview, search, 1).is_empty() {
+    if first_search_match(preview, search).is_some() {
         return None;
     }
     // Rows can also match via file_paths or note; reject absent terms with a
@@ -55,7 +55,7 @@ pub fn search_excerpt(full: &str, preview: &str, search: &str) -> Option<String>
     if !full.contains(search) && !full.to_lowercase().contains(&search.to_lowercase()) {
         return None;
     }
-    let matched = matching_ranges(full, search, 1).pop()?;
+    let matched = first_search_match(full, search)?;
     let start = full[..matched.start]
         .char_indices()
         .rev()

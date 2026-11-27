@@ -59,14 +59,15 @@ impl ClipboardView {
                     .zip(item.image_height)
                     .or_else(|| image_file_dimensions(path))
             });
-            let (Some(viewport), Some(row_offset)) =
-                (self.drag_viewport.get(), self.row_offsets.get(index))
+            let (Some(viewport), Some(row)) =
+                (self.drag_viewport.get(), self.history_hover_row(index))
             else {
                 return;
             };
             let spacing = px(visual::card_spacing(self.display.value.card_density));
-            let top = viewport.top() + *row_offset + self.scroll.offset().y + spacing;
-            let bottom = top + px(history_row_height(item, self.display.value)) - spacing * 2.;
+            let origin = viewport.top() + self.scroll.offset().y;
+            let top = origin + row.start + spacing;
+            let bottom = origin + row.end - spacing;
             let visible_top = top.max(viewport.top());
             let visible_bottom = bottom.min(viewport.bottom());
             if visible_bottom <= visible_top {

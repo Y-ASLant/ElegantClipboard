@@ -60,18 +60,31 @@ pub const DAILY_CHART_HEIGHT: f32 = 152.;
 /// Narrow columns across a text card. 14px UI text fits about 44 ASCII
 /// characters, or 22 full-width characters, before it wraps.
 pub const TEXT_COLUMNS_PER_LINE: usize = 44;
-/// The file title sits beside the thumbnail, so it wraps sooner.
-pub const FILE_COLUMNS_PER_LINE: usize = 36;
 
 /// Preview lines are a cap. Narrow characters must not be counted as full-width,
 /// or a two-line key reserves a blank third line.
 pub fn capped_preview_lines(text: &str, max_lines: u8, columns_per_line: usize) -> u8 {
     let max_lines = usize::from(max_lines.max(1));
     let per_line = columns_per_line.max(1);
-    let hard = text.split('\n').count().max(1);
-    let columns = text.chars().map(column_width).sum::<usize>();
-    let soft = columns.div_ceil(per_line).max(1);
-    hard.max(soft).min(max_lines) as u8
+    let mut lines = 1;
+    let mut columns = 0;
+    for ch in text.chars() {
+        if lines >= max_lines {
+            break;
+        }
+        if ch == '\n' {
+            lines += 1;
+            columns = 0;
+        } else {
+            let width = column_width(ch);
+            if columns != 0 && columns + width > per_line {
+                lines += 1;
+                columns = 0;
+            }
+            columns += width;
+        }
+    }
+    lines as u8
 }
 
 fn column_width(ch: char) -> usize {
@@ -96,24 +109,22 @@ fn is_full_width(ch: char) -> bool {
     )
 }
 
-fn card_chrome(density: CardDensity) -> f32 {
+pub fn row_height_for_body(density: CardDensity, body_height: f32) -> f32 {
     let spacing = card_spacing(density);
     // Row padding, card padding and border, the gap above metadata, then the metadata row.
-    spacing * 2. + card_padding(density) * 2. + BORDER_WIDTH * 2. + spacing + METADATA_ROW_HEIGHT
+    spacing * 2.
+        + card_padding(density) * 2.
+        + BORDER_WIDTH * 2.
+        + body_height
+        + spacing
+        + METADATA_ROW_HEIGHT
 }
 
 pub fn row_height(density: CardDensity, preview_lines: u8) -> f32 {
-    card_chrome(density) + PREVIEW_LINE_HEIGHT * f32::from(preview_lines.max(1))
-}
-
-pub fn media_row_height(density: CardDensity, image: bool, title_lines: u8) -> f32 {
-    let thumb = if image {
-        thumbnail_size(density).1
-    } else {
-        FILE_THUMBNAIL_HEIGHT
-    };
-    let title = PREVIEW_LINE_HEIGHT * f32::from(title_lines.max(1));
-    card_chrome(density) + thumb.max(title)
+    row_height_for_body(
+        density,
+        PREVIEW_LINE_HEIGHT * f32::from(preview_lines.max(1)),
+    )
 }
 
 /// One-sided inset around a card inside its row.
@@ -481,7 +492,8 @@ mod color_transition_tests {
 #[cfg(test)]
 mod card_height_tests {
     use super::{
-        CardDensity, TEXT_COLUMNS_PER_LINE, capped_preview_lines, media_row_height, row_height,
+        CardDensity, FILE_THUMBNAIL_HEIGHT, TEXT_COLUMNS_PER_LINE, capped_preview_lines,
+        row_height, row_height_for_body,
     };
 
     #[test]
@@ -498,7 +510,8 @@ mod card_height_tests {
             capped_preview_lines(&"字".repeat(23), 3, TEXT_COLUMNS_PER_LINE),
             2
         );
-        assert!(media_row_height(density, false, 1) < row_height(density, 3));
+        assert_eq!(capped_preview_lines("abcdefgh\nx", 3, 5), 3);
+        assert!(row_height_for_body(density, FILE_THUMBNAIL_HEIGHT) < row_height(density, 3));
     }
 }
 

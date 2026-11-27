@@ -228,6 +228,23 @@ fn fill_search_excerpts(
     items: &mut [ClipboardItem],
     search: &str,
 ) -> Result<(), rusqlite::Error> {
+    // File searches can match a directory or an unlisted filename, not the
+    // displayed basename. Use the decoded path, never its JSON serialization.
+    for item in items
+        .iter_mut()
+        .filter(|item| item.content_type == "files" && item.note.is_some())
+    {
+        let preview = item.preview.as_deref().unwrap_or_default();
+        if crate::search::search_excerpt_needed(preview, search)
+            && crate::search::first_search_match(item.note.as_deref().unwrap_or_default(), search)
+                .is_none()
+            && let Some(excerpt) = crate::parse_file_paths_for_display(item.file_paths.as_deref())
+                .iter()
+                .find_map(|path| crate::search::search_excerpt(path, "", search))
+        {
+            item.preview = Some(excerpt);
+        }
+    }
     let needed: Vec<i64> = items
         .iter()
         .filter(|item| {

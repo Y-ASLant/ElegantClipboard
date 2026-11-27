@@ -13,11 +13,13 @@ mod events;
 mod external_drag;
 mod favorite_drop;
 use favorite_drop::FavoriteDropZone;
+mod card_note;
 mod file_cards;
 mod group_select;
 mod groups;
 mod history_card;
 mod history_events;
+mod history_geometry;
 mod history_list;
 mod history_scroll_top;
 mod hover_content;
@@ -92,7 +94,7 @@ mod window_show;
 pub use startup::run;
 
 use file_cards::{FileCardInfo, image_file_dimensions, image_file_record, single_file_image_path};
-use navigation::{history_row_height, history_top_row, show_history_scroll_to_top};
+use navigation::{history_top_row, show_history_scroll_to_top};
 use presentation::{
     SettingsDangerDialog, apply_theme, dialog_copy, dialog_footer, dialog_shell, dialog_title,
     format_bytes, localize_service_message, open_reset_application_dialog,
@@ -385,6 +387,9 @@ struct ClipboardView {
     scroll_to_top_task: Option<Task<()>>,
     scroll_to_top_generation: Option<u64>,
     scroll_top_position: history_scroll_top::ScrollTopPosition,
+    // A new query can be pending while the previous snapshot is still drawable.
+    history_search: SharedString,
+    row_search: SharedString,
     row_sizes: Rc<Vec<gpui_kit::Size<Pixels>>>,
     row_offsets: Vec<Pixels>,
     monitoring: bool,

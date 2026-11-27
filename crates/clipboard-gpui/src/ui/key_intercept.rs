@@ -55,12 +55,27 @@ impl ClipboardView {
             }
             return;
         }
+        let from_list = self.list_focus.is_focused(window) && !self.onboarding_visible();
+        #[cfg(windows)]
+        if from_list || self.search.read(cx).focus_handle(cx).is_focused(window) {
+            // The hook delivers text while another process is foreground. Update
+            // the Kit input directly, without activating the panel for replay.
+            self.search.update(cx, |input, cx| {
+                if from_list {
+                    input.focus(window, cx);
+                }
+                if let Some(character) = key.search_character {
+                    input.insert(character.encode_utf8(&mut [0; 4]), window, cx);
+                }
+            });
+            return;
+        }
         key.queue_for_replay();
         if self.typing_activation.is_some() {
             return;
         }
         // Typing from the list searches; a focused dialog or editor input keeps focus.
-        if self.list_focus.is_focused(window) && !self.onboarding_visible() {
+        if from_list {
             self.search.update(cx, |input, cx| input.focus(window, cx));
         }
         if window.is_window_active() {

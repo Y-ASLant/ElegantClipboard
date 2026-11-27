@@ -4,6 +4,44 @@ use super::*;
 use gpui_kit::component::tag::Tag;
 
 #[derive(Clone)]
+pub(super) struct CardText {
+    text: SharedString,
+    highlights: Vec<(std::ops::Range<usize>, HighlightStyle)>,
+}
+
+impl CardText {
+    pub(super) fn plain(text: impl Into<SharedString>) -> Self {
+        Self {
+            text: text.into(),
+            highlights: Vec::new(),
+        }
+    }
+
+    pub(super) fn searched(text: impl Into<SharedString>, search: &str, cx: &App) -> Self {
+        let mut label = Self::plain(text);
+        label.highlights = clipboard_core::search::search_highlight_ranges(&label.text, search)
+            .into_iter()
+            .map(|range| {
+                (
+                    range,
+                    HighlightStyle {
+                        color: Some(cx.theme().blue),
+                        background_color: Some(cx.theme().primary.opacity(0.18)),
+                        font_weight: Some(FontWeight::SEMIBOLD),
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect();
+        label
+    }
+
+    fn styled(&self) -> StyledText {
+        StyledText::new(self.text.clone()).with_highlights(self.highlights.clone())
+    }
+}
+
+#[derive(Clone)]
 pub(super) struct HistoryCardSnapshot {
     pub(super) is_image: bool,
     pub(super) is_files: bool,
@@ -14,8 +52,9 @@ pub(super) struct HistoryCardSnapshot {
     pub(super) display: DisplayPreference,
     pub(super) language: LanguagePreference,
     pub(super) summary: String,
-    pub(super) preview_text: String,
-    pub(super) highlights: Vec<(std::ops::Range<usize>, HighlightStyle)>,
+    pub(super) title: CardText,
+    pub(super) is_note: bool,
+    pub(super) source_match: Option<CardText>,
     pub(super) thumbnail_path: Option<PathBuf>,
     // Cloning a drag snapshot also retains the decoded pixels after list eviction.
     pub(super) thumbnail: Option<gpui_kit::ImageSource>,
@@ -198,13 +237,39 @@ impl HistoryCardSnapshot {
             } else {
                 cx.theme().foreground
             });
-        if self.is_image {
+        let title = if self.is_image && !self.is_note {
             text.font_medium().child(tr(self.language, "图片", "Image"))
         } else {
-            text.child(
-                StyledText::new(self.preview_text.clone()).with_highlights(self.highlights.clone()),
-            )
+            text.child(self.title.styled())
+        };
+        if !self.is_note {
+            return title;
         }
+        let note = div()
+            .flex()
+            .items_start()
+            .gap(px(visual::SPACE_1))
+            .child(
+                Icon::new(IconName::FileText)
+                    .size(px(visual::ICON_SIZE))
+                    .text_color(cx.theme().muted_foreground),
+            )
+            .child(title.flex_1());
+        div().min_w_0().flex().flex_col().child(note).when_some(
+            self.source_match.as_ref(),
+            |column, source| {
+                column.child(
+                    div()
+                        .min_w_0()
+                        .h(px(visual::PREVIEW_LINE_HEIGHT))
+                        .line_clamp(1)
+                        .text_ellipsis()
+                        .text_size(px(visual::TEXT_SMALL))
+                        .text_color(cx.theme().muted_foreground)
+                        .child(source.styled()),
+                )
+            },
+        )
     }
 
     pub(super) fn surface(

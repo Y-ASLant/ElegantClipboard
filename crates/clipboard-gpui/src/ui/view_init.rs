@@ -405,6 +405,8 @@ impl ClipboardView {
             scroll_to_top_task: None,
             scroll_to_top_generation: None,
             scroll_top_position: history_scroll_top::ScrollTopPosition::default(),
+            history_search: SharedString::default(),
+            row_search: SharedString::default(),
             row_sizes: Rc::new(Vec::new()),
             row_offsets: vec![px(0.)],
             monitoring: startup.monitoring,

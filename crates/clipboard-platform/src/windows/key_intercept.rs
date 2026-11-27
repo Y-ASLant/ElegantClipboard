@@ -6,7 +6,6 @@ use anyhow::{Context, Result, anyhow};
 use async_channel::Sender;
 use std::{
     cell::RefCell,
-    collections::HashSet,
     sync::{Mutex, mpsc},
     thread::{self, JoinHandle},
 };
@@ -15,17 +14,19 @@ use windows::Win32::{
     System::Threading::{GetCurrentProcessId, GetCurrentThreadId},
     UI::{
         Input::KeyboardAndMouse::{
-            GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
-            KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, MAPVK_VK_TO_CHAR, MapVirtualKeyW, SendInput,
-            VIRTUAL_KEY, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_LEFT,
-            VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_RWIN, VK_SHIFT, VK_SPACE,
-            VK_UP,
+            GetAsyncKeyState, GetKeyState, GetKeyboardLayout, INPUT, INPUT_0, INPUT_KEYBOARD,
+            KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP,
+            KEYEVENTF_UNICODE, MAPVK_VK_TO_CHAR, MapVirtualKeyExW, SendInput, ToUnicodeEx,
+            VIRTUAL_KEY, VK_BACK, VK_CAPITAL, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE,
+            VK_HOME, VK_LEFT, VK_LWIN, VK_MENU, VK_NEXT, VK_PACKET, VK_PRIOR, VK_RETURN, VK_RIGHT,
+            VK_RWIN, VK_SHIFT, VK_SPACE, VK_UP,
         },
         WindowsAndMessaging::{
             CallNextHookEx, GetForegroundWindow, GetMessageW, GetWindowThreadProcessId, HC_ACTION,
-            IsWindowVisible, KBDLLHOOKSTRUCT, LLKHF_EXTENDED, LLKHF_INJECTED, MSG, PM_NOREMOVE,
-            PeekMessageW, PostThreadMessageW, SetWindowsHookExW, UnhookWindowsHookEx,
-            WH_KEYBOARD_LL, WM_KEYDOWN, WM_QUIT, WM_SYSKEYDOWN,
+            IsWindowVisible, KBDLLHOOKSTRUCT, LLKHF_EXTENDED, LLKHF_INJECTED,
+            LLKHF_LOWER_IL_INJECTED, MSG, PM_NOREMOVE, PeekMessageW, PostThreadMessageW,
+            SetWindowsHookExW, UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_KEYDOWN, WM_QUIT,
+            WM_SYSKEYDOWN,
         },
     },
 };
@@ -39,7 +40,7 @@ const NAVIGATION_VKS: [VIRTUAL_KEY; 11] = [
 struct HookTarget {
     sender: Sender<InterceptedKey>,
     hwnd: isize,
-    swallowed: HashSet<u32>,
+    swallowed: [bool; 256],
 }
 
 thread_local! {
@@ -49,17 +50,36 @@ thread_local! {
 /// Text keys swallowed before the window took focus, replayed in order.
 static PENDING_TEXT: Mutex<Vec<(u16, u16, bool)>> = Mutex::new(Vec::new());
 
+// Only our replay should bypass interception; accessibility tools can send ordinary input.
+const REPLAY_MARKER: usize = 0xec1b_04ad;
+
 fn key_down(key: VIRTUAL_KEY) -> bool {
     (unsafe { GetAsyncKeyState(i32::from(key.0)) }) < 0
 }
 
-fn foreground_is_ours() -> bool {
+fn external_foreground_thread() -> Option<u32> {
     let mut process_id = 0;
-    unsafe { GetWindowThreadProcessId(GetForegroundWindow(), Some(&mut process_id)) };
-    process_id == unsafe { GetCurrentProcessId() }
+    let thread_id =
+        unsafe { GetWindowThreadProcessId(GetForegroundWindow(), Some(&mut process_id)) };
+    (thread_id != 0 && process_id != unsafe { GetCurrentProcessId() }).then_some(thread_id)
 }
 
-fn classify(info: &KBDLLHOOKSTRUCT) -> Option<InterceptedKey> {
+/// An IME layout can defer a physical key rather than translating it. In
+/// passive search there is no composition session; keep basic alphanumerics.
+fn untranslated_alphanumeric(vk: u32, shift: bool, caps: bool) -> Option<u16> {
+    match u8::try_from(vk).ok()? {
+        key @ b'A'..=b'Z' => Some(u16::from(if shift ^ caps {
+            key
+        } else {
+            key.to_ascii_lowercase()
+        })),
+        key @ b'0'..=b'9' if !shift => Some(u16::from(key)),
+        key @ 0x60..=0x69 => Some(u16::from(b'0' + key - 0x60)),
+        _ => None,
+    }
+}
+
+fn classify(info: &KBDLLHOOKSTRUCT, foreground_thread: u32) -> Option<InterceptedKey> {
     if key_down(VK_MENU) || key_down(VK_LWIN) || key_down(VK_RWIN) {
         return None;
     }
@@ -73,8 +93,16 @@ fn classify(info: &KBDLLHOOKSTRUCT) -> Option<InterceptedKey> {
             shift,
         });
     }
-    let character = unsafe { MapVirtualKeyW(vk, MAPVK_VK_TO_CHAR) } & 0x7fff;
+    if vk == u32::from(VK_BACK.0) && !control {
+        return Some(InterceptedKey::Shortcut {
+            key: "backspace",
+            control,
+            shift,
+        });
+    }
+    let layout = unsafe { GetKeyboardLayout(foreground_thread) };
     if control {
+        let character = unsafe { MapVirtualKeyExW(vk, MAPVK_VK_TO_CHAR, Some(layout)) };
         let key = char::from_u32(character).and_then(control_shortcut)?;
         return Some(InterceptedKey::Shortcut {
             key,
@@ -82,10 +110,35 @@ fn classify(info: &KBDLLHOOKSTRUCT) -> Option<InterceptedKey> {
             shift,
         });
     }
-    (character >= 0x20).then_some(InterceptedKey::Text(InterceptedText {
+    let unit = if vk == u32::from(VK_PACKET.0) {
+        // Unicode input (e.g. an on-screen keyboard) carries one UTF-16 unit in scanCode.
+        Some(info.scanCode as u16)
+    } else {
+        let mut state = [0; 256];
+        state[usize::from(VK_SHIFT.0)] = if shift { 0x80 } else { 0 };
+        state[usize::from(VK_CAPITAL.0)] =
+            (unsafe { GetKeyState(i32::from(VK_CAPITAL.0)) } & 1) as u8;
+        let mut units = [0; 8];
+        // Bit 2 leaves the source keyboard's dead-key/composition state untouched.
+        match unsafe { ToUnicodeEx(vk, info.scanCode, &state, &mut units, 4, Some(layout)) } {
+            0 => Some(untranslated_alphanumeric(
+                vk,
+                shift,
+                state[usize::from(VK_CAPITAL.0)] != 0,
+            )?),
+            1 => Some(units[0]),
+            // A dead key or a multi-unit translation is native text, not plain ASCII.
+            _ => None,
+        }
+    };
+    if unit.is_some_and(|u| u < 0x20 || u == 0x7f) {
+        return None;
+    }
+    Some(InterceptedKey::Text(InterceptedText {
         keycode: vk as u16,
         scan_code: info.scanCode as u16,
         extended: info.flags.0 & LLKHF_EXTENDED.0 != 0,
+        search_character: unit.filter(|&u| u <= 0x7e).map(|u| char::from(u as u8)),
         unmodified_space: vk == u32::from(VK_SPACE.0) && !shift,
         is_held: false,
     }))
@@ -96,31 +149,36 @@ unsafe extern "system" fn keyboard_hook(code: i32, message: WPARAM, data: LPARAM
     if code == HC_ACTION as i32 {
         let info = unsafe { *(data.0 as *const KBDLLHOOKSTRUCT) };
         let pressed = matches!(message.0 as u32, WM_KEYDOWN | WM_SYSKEYDOWN);
-        if info.flags.0 & LLKHF_INJECTED.0 == 0 {
+        if info.flags.0 & LLKHF_LOWER_IL_INJECTED.0 == 0
+            && !(info.flags.0 & LLKHF_INJECTED.0 != 0 && info.dwExtraInfo == REPLAY_MARKER)
+        {
             HOOK_TARGET.with(|target| {
                 let mut target = target.borrow_mut();
                 let Some(target) = target.as_mut() else {
                     return;
                 };
-                if !pressed {
-                    swallow = target.swallowed.remove(&info.vkCode);
-                    return;
-                }
-                if !unsafe { IsWindowVisible(HWND(target.hwnd as *mut _)) }.as_bool()
-                    || foreground_is_ours()
-                {
-                    return;
-                }
-                // Never block the hook on the UI; classification reads async key state only.
-                let Some(mut key) = classify(&info) else {
+                let Some(previous) = target.swallowed.get_mut(info.vkCode as usize) else {
                     return;
                 };
-                let is_held = !target.swallowed.insert(info.vkCode);
+                let is_held = std::mem::take(previous);
+                if !pressed {
+                    swallow = is_held;
+                    return;
+                }
+                if !unsafe { IsWindowVisible(HWND(target.hwnd as *mut _)) }.as_bool() {
+                    return;
+                }
+                let Some(thread_id) = external_foreground_thread() else {
+                    return;
+                };
+                let Some(mut key) = classify(&info, thread_id) else {
+                    return;
+                };
                 if let InterceptedKey::Text(text) = &mut key {
                     text.is_held = is_held;
                 }
-                let _ = target.sender.try_send(key);
-                swallow = true;
+                swallow = target.sender.try_send(key).is_ok();
+                *previous = swallow;
             });
         }
     }
@@ -147,10 +205,12 @@ pub fn replay_pending_text() -> Result<()> {
     let inputs: Vec<INPUT> = keys
         .into_iter()
         .flat_map(|(vk, scan, extended)| {
-            let flags = if extended {
-                KEYEVENTF_EXTENDEDKEY
+            let (vk, flags) = if vk == VK_PACKET.0 {
+                (0, KEYEVENTF_UNICODE)
+            } else if extended {
+                (vk, KEYEVENTF_EXTENDEDKEY)
             } else {
-                KEYBD_EVENT_FLAGS(0)
+                (vk, KEYBD_EVENT_FLAGS(0))
             };
             [flags, flags | KEYEVENTF_KEYUP].map(|key_flags| INPUT {
                 r#type: INPUT_KEYBOARD,
@@ -159,6 +219,7 @@ pub fn replay_pending_text() -> Result<()> {
                         wVk: VIRTUAL_KEY(vk),
                         wScan: scan,
                         dwFlags: key_flags,
+                        dwExtraInfo: REPLAY_MARKER,
                         ..Default::default()
                     },
                 },
@@ -201,7 +262,7 @@ impl KeyInterceptor {
                     *slot.borrow_mut() = Some(HookTarget {
                         sender: events,
                         hwnd: window_handle,
-                        swallowed: HashSet::new(),
+                        swallowed: [false; 256],
                     });
                 });
                 let hook =
@@ -240,5 +301,24 @@ impl Drop for KeyInterceptor {
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::untranslated_alphanumeric;
+
+    #[test]
+    fn untranslated_keys_preserve_case_and_digits_without_guessing_layout_symbols() {
+        let translated = |vk, shift, caps| {
+            untranslated_alphanumeric(vk, shift, caps).and_then(|unit| char::from_u32(unit.into()))
+        };
+        assert_eq!(translated(0x41, false, false), Some('a'));
+        assert_eq!(translated(0x41, false, true), Some('A'));
+        assert_eq!(translated(0x41, true, true), Some('a'));
+        assert_eq!(translated(0x37, false, false), Some('7'));
+        assert_eq!(translated(0x67, false, false), Some('7'));
+        assert_eq!(translated(0x37, true, false), None);
+        assert_eq!(translated(0xe5, false, false), None); // VK_PROCESSKEY
     }
 }

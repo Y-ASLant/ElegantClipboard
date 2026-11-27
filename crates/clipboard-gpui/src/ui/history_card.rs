@@ -1,7 +1,6 @@
 use super::file_cards::{FileCardAvailability, FileCardKind};
 use super::presentation::content_type_label;
 use super::*;
-use clipboard_core::search::search_highlight_ranges;
 
 #[derive(Default)]
 struct CardHover {
@@ -64,11 +63,14 @@ impl ClipboardView {
         let focused = self.history.selected == Some(id);
         let selected = focused && !self.batch_mode;
         let marked = self.selected_ids.contains(&id);
-        let (preview_text, highlights) = if is_image {
-            (String::new(), Vec::new())
+        let note = card_note::note_title(item);
+        let search = self.row_search.as_ref();
+        let title = if let Some(note) = note {
+            drag_visual::CardText::searched(note.to_owned(), search, cx)
+        } else if is_image {
+            drag_visual::CardText::plain("")
         } else {
             let saved_preview = item.preview.as_deref().unwrap_or(kind);
-            let search = self.search.read(cx).value();
             let file_names = if file_paths.len() > 1 {
                 let paths = &file_paths;
                 let mut names = paths
@@ -94,21 +96,7 @@ impl ClipboardView {
                 None
             };
             let preview_text = file_names.unwrap_or_else(|| saved_preview.to_owned());
-            let highlights = search_highlight_ranges(&preview_text, &search)
-                .into_iter()
-                .map(|range| {
-                    (
-                        range,
-                        HighlightStyle {
-                            color: Some(cx.theme().blue),
-                            background_color: Some(cx.theme().primary.opacity(0.18)),
-                            font_weight: Some(FontWeight::SEMIBOLD),
-                            ..Default::default()
-                        },
-                    )
-                })
-                .collect::<Vec<_>>();
-            (preview_text, highlights)
+            drag_visual::CardText::searched(preview_text, search, cx)
         };
         let card = drag_visual::HistoryCardSnapshot {
             is_image,
@@ -120,8 +108,10 @@ impl ClipboardView {
             display: self.display.value,
             language: self.language,
             summary,
-            preview_text,
-            highlights,
+            title,
+            is_note: note.is_some(),
+            source_match: card_note::matching_source(item, search)
+                .map(|source| drag_visual::CardText::searched(source.to_owned(), search, cx)),
             thumbnail: thumbnail_path.as_ref().and_then(|path| {
                 self.thumbnails
                     .source(&self.thumbnail_key(item, path.clone()))
@@ -199,16 +189,7 @@ impl ClipboardView {
         let card_spacing = visual::card_spacing(self.display.value.card_density);
         let card_padding = visual::card_padding(self.display.value.card_density);
         let last = index + 1 == self.history.items.len();
-        let row_height = self.row_sizes.get(index).map_or_else(
-            || {
-                let mut height = px(history_row_height(item, self.display.value));
-                if last {
-                    height += px(visual::last_row_extra(self.display.value.card_density));
-                }
-                height
-            },
-            |size| size.height,
-        );
+        let row_height = self.row_sizes[index].height;
         let entity = cx.entity();
         let card_flash = self
             .copy_flash

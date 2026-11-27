@@ -55,6 +55,21 @@ fn notes_persist_search_and_reject_oversize() -> Result<()> {
 }
 
 #[test]
+fn noted_file_search_shows_the_matching_path_without_replacing_the_saved_summary() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let history = History::open(dir.path().join("clipboard.db"))?;
+    let paths = ["team/Release/report.txt".to_owned()];
+    let id = history.capture_files(&paths, &dir.path().join("images"))?;
+    history.set_note(id, "部署清单")?;
+
+    let rows = history.list("release", 10, false)?;
+    assert_eq!(rows[0].note.as_deref(), Some("部署清单"));
+    assert_eq!(rows[0].preview.as_deref(), Some(paths[0].as_str()));
+    assert_eq!(history.item(id)?.preview.as_deref(), Some("report.txt"));
+    Ok(())
+}
+
+#[test]
 fn database_maintenance_reclaims_free_pages_and_preserves_history() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let database = directory.path().join("clipboard.db");

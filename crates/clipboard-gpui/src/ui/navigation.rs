@@ -1,59 +1,8 @@
 pub(super) const HISTORY_REPLY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 use super::*;
-use crate::state::HistoryItems;
 use clipboard_core::HISTORY_PAGE_ROWS;
 use std::ops::Range;
-pub(super) fn history_row_height(
-    item: &clipboard_core::database::ClipboardItem,
-    display: DisplayPreference,
-) -> f32 {
-    let preview = item.preview.as_deref().unwrap_or("");
-    if item.content_type == "image" {
-        visual::media_row_height(display.card_density, true, 1)
-    } else if item.content_type == "files" {
-        let lines = visual::capped_preview_lines(
-            preview,
-            display.card_max_lines,
-            visual::FILE_COLUMNS_PER_LINE,
-        );
-        visual::media_row_height(display.card_density, false, lines)
-    } else {
-        let lines = visual::capped_preview_lines(
-            preview,
-            display.card_max_lines,
-            visual::TEXT_COLUMNS_PER_LINE,
-        );
-        visual::row_height(display.card_density, lines)
-    }
-}
-
-pub(super) fn history_row_layout(
-    items: &HistoryItems,
-    display: DisplayPreference,
-) -> (Rc<Vec<gpui_kit::Size<Pixels>>>, Vec<Pixels>) {
-    let mut sizes = Vec::with_capacity(items.len());
-    let mut offsets = Vec::with_capacity(items.len() + 1);
-    let mut top = px(0.);
-    offsets.push(top);
-    let trailing = px(visual::last_row_extra(display.card_density));
-    // Rows beyond the loaded pages are at least one preview line tall: the
-    // estimate self-corrects as pages arrive, and the error amortizes across
-    // the position independent of scroll direction.
-    let gap = px(visual::row_height(display.card_density, 1));
-    for (index, item) in items.iter().enumerate() {
-        let mut height = item
-            .as_ref()
-            .map_or(gap, |item| px(history_row_height(item, display)));
-        if index + 1 == items.len() {
-            height += trailing;
-        }
-        sizes.push(size(px(0.), height));
-        top += height;
-        offsets.push(top);
-    }
-    (Rc::new(sizes), offsets)
-}
 
 pub(super) fn history_top_row(offsets: &[Pixels], scroll_y: Pixels) -> (usize, Pixels) {
     let top = -scroll_y;
@@ -135,11 +84,7 @@ impl ClipboardView {
             }
             if self.send(
                 Command::Query {
-                    search: if self.located.is_some() {
-                        String::new()
-                    } else {
-                        self.search.read(cx).value().to_string()
-                    },
+                    search: self.row_search.to_string(),
                     limit: (end - start) as i64,
                     offset: start as i64,
                     favorite_only: self.history.favorite_only(),
@@ -166,12 +111,7 @@ impl ClipboardView {
         let generation = self.history.generation;
         if !self.send(
             Command::Query {
-                // A located row shows the full list; the typed search is kept for later.
-                search: if self.located.is_some() {
-                    String::new()
-                } else {
-                    self.search.read(cx).value().to_string()
-                },
+                search: self.history_search.to_string(),
                 limit: HISTORY_PAGE_ROWS as i64,
                 offset: 0,
                 favorite_only: self.history.favorite_only(),
@@ -202,6 +142,7 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) {
         let generation = reload.generation();
+        self.history_search = self.effective_history_search(cx);
         if !self.history.loading {
             self.history_snapshot_applied(cx);
         }
@@ -235,6 +176,7 @@ impl ClipboardView {
 
     pub(super) fn reload_current_history(&mut self, cx: &mut Context<Self>) {
         let generation = self.history.generation;
+        self.history_search = self.effective_history_search(cx);
         if self.query(cx) {
             self.arm_history_reply_timeout(generation, cx);
         }
@@ -495,10 +437,12 @@ impl ClipboardView {
         }
     }
 
-    pub(super) fn rebuild_row_layout(&mut self) {
-        (self.row_sizes, self.row_offsets) =
-            history_row_layout(&self.history.items, self.display.value);
-        self.drag_motion = DragMotionState::default();
+    fn effective_history_search(&self, cx: &App) -> SharedString {
+        if self.located.is_some() {
+            SharedString::default()
+        } else {
+            self.search.read(cx).value()
+        }
     }
 
     pub(super) fn select(
