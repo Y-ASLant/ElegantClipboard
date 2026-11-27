@@ -47,6 +47,9 @@ impl ClipboardView {
         } else {
             kind.to_owned()
         };
+        if card_note::note_title(item).is_some() {
+            summary.push_str(tr(self.language, " · 备注", " · Note"));
+        }
         if self.display.value.show_time
             && !is_image
             && !matches!(item.content_type.as_str(), "text" | "url")

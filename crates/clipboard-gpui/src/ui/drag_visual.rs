@@ -242,33 +242,18 @@ impl HistoryCardSnapshot {
         } else {
             text.child(self.title.styled())
         };
-        if !self.is_note {
+        let Some(source) = self.source_match.as_ref() else {
             return title;
-        }
-        let note = div()
-            .flex()
-            .items_start()
-            .gap(px(visual::SPACE_1))
-            .child(
-                Icon::new(IconName::FileText)
-                    .size(px(visual::ICON_SIZE))
-                    .text_color(cx.theme().muted_foreground),
-            )
-            .child(title.flex_1());
-        div().min_w_0().flex().flex_col().child(note).when_some(
-            self.source_match.as_ref(),
-            |column, source| {
-                column.child(
-                    div()
-                        .min_w_0()
-                        .h(px(visual::PREVIEW_LINE_HEIGHT))
-                        .line_clamp(1)
-                        .text_ellipsis()
-                        .text_size(px(visual::TEXT_SMALL))
-                        .text_color(cx.theme().muted_foreground)
-                        .child(source.styled()),
-                )
-            },
+        };
+        div().min_w_0().flex().flex_col().child(title).child(
+            div()
+                .min_w_0()
+                .h(px(visual::PREVIEW_LINE_HEIGHT))
+                .line_clamp(1)
+                .text_ellipsis()
+                .text_size(px(visual::TEXT_SMALL))
+                .text_color(cx.theme().muted_foreground)
+                .child(source.styled()),
         )
     }
 

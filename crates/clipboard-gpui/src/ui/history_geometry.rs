@@ -19,14 +19,10 @@ fn history_row_height(
     let title_lines = if note.is_none() && item.content_type == "image" {
         1
     } else {
-        // Estimate wrapping in narrow-character columns, excluding the thumbnail
-        // and the note indicator that share this row with the title.
+        // The thumbnail shares the title row; the note marker lives in the footer.
         let mut width = visual::TEXT_COLUMNS_PER_LINE as f32 * visual::TEXT_BODY / 2.;
         if thumbnail_width > 0. {
             width -= thumbnail_width + visual::SPACE_3;
-        }
-        if note.is_some() {
-            width -= visual::ICON_SIZE + visual::SPACE_1;
         }
         let columns = (width / (font_size / 2.)).ceil() as usize;
         visual::capped_preview_lines(
@@ -36,11 +32,8 @@ fn history_row_height(
         )
     };
     let mut text_height = f32::from(title_lines) * font_size * visual::COPY_LINE_HEIGHT;
-    if note.is_some() {
-        text_height = text_height.max(visual::ICON_SIZE);
-        if !search.is_empty() && card_note::matching_source(item, search).is_some() {
-            text_height += visual::PREVIEW_LINE_HEIGHT;
-        }
+    if !search.is_empty() && card_note::matching_source(item, search).is_some() {
+        text_height += visual::PREVIEW_LINE_HEIGHT;
     }
     visual::row_height_for_body(density, thumbnail_height.max(text_height))
 }
