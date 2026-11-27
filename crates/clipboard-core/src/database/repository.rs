@@ -26,6 +26,7 @@ pub struct ClipboardItem {
     pub image_width: Option<i64>,
     pub image_height: Option<i64>,
     pub is_pinned: bool,
+    pub is_favorite_pinned: bool,
     pub is_favorite: bool,
     pub favorite_order: i64,
     pub sort_order: i64,
@@ -46,6 +47,14 @@ pub struct ClipboardItem {
 }
 
 impl ClipboardItem {
+    pub fn pinned_in(&self, favorite_only: bool) -> bool {
+        if favorite_only {
+            self.is_favorite_pinned
+        } else {
+            self.is_pinned
+        }
+    }
+
     /// 存储的类型串解析为枚举；未知值不作为纯文本处理。
     pub fn kind(&self) -> Option<ContentType> {
         ContentType::parse(&self.content_type)

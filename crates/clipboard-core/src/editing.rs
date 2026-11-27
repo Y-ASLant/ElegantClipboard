@@ -118,7 +118,7 @@ mod tests {
         let group = history.create_group("工作")?;
         history.move_to_group(id, None, Some(group.id))?;
         history.toggle_favorite(id)?;
-        history.toggle_pin(id)?;
+        history.toggle_pin(id, false)?;
         let hash = history.item(id)?.content_hash;
         assert!(!history.edit_text(id, &hash, "original", dir.path())?);
         assert!(history.edit_text(id, &hash, " ", dir.path()).is_err());

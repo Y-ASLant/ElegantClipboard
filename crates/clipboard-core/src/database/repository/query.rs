@@ -81,7 +81,7 @@ impl ClipboardRepository {
 
     fn order_clause(favorite_only: bool) -> &'static str {
         if favorite_only {
-            " ORDER BY is_pinned DESC, favorite_order DESC, sort_order DESC, created_at DESC"
+            " ORDER BY is_favorite_pinned DESC, favorite_order DESC, sort_order DESC, created_at DESC"
         } else {
             " ORDER BY is_pinned DESC, sort_order DESC, created_at DESC"
         }
@@ -90,13 +90,13 @@ impl ClipboardRepository {
     /// 列表查询列（排除大文本字段以减少 IPC 传输）
     const LIST_COLUMNS: &'static str = "id, content_type, NULL AS text_content, NULL AS html_content, NULL AS rtf_content, \
          image_path, file_paths, NULL AS file_payload, content_hash, semantic_hash, preview, byte_size, image_width, image_height, \
-         is_pinned, is_favorite, favorite_order, sort_order, created_at, updated_at, access_count, last_accessed_at, char_count, \
+         is_pinned, is_favorite_pinned, is_favorite, favorite_order, sort_order, created_at, updated_at, access_count, last_accessed_at, char_count, \
          source_app_name, source_app_icon, note, group_id";
 
     /// 搜索查询列（含 text_content 用于关键词上下文预览）
     const SEARCH_COLUMNS: &'static str = "id, content_type, text_content, NULL AS html_content, NULL AS rtf_content, \
          image_path, file_paths, NULL AS file_payload, content_hash, semantic_hash, preview, byte_size, image_width, image_height, \
-         is_pinned, is_favorite, favorite_order, sort_order, created_at, updated_at, access_count, last_accessed_at, char_count, \
+         is_pinned, is_favorite_pinned, is_favorite, favorite_order, sort_order, created_at, updated_at, access_count, last_accessed_at, char_count, \
          source_app_name, source_app_icon, note, group_id";
 
     pub fn list(&self, options: QueryOptions) -> Result<Vec<ClipboardItem>, rusqlite::Error> {
@@ -172,6 +172,7 @@ impl ClipboardRepository {
             image_width: row.get("image_width")?,
             image_height: row.get("image_height")?,
             is_pinned: row.get("is_pinned")?,
+            is_favorite_pinned: row.get("is_favorite_pinned")?,
             is_favorite: row.get("is_favorite")?,
             favorite_order: row.get("favorite_order")?,
             sort_order: row.get("sort_order")?,

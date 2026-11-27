@@ -121,7 +121,7 @@ fn content_edits_invalidate_names_but_noops_and_metadata_changes_do_not() -> Res
     history.set_captured_formats(id, &expected)?;
     let expected = history.item(id)?.formats;
     let hash = history.item(id)?.content_hash;
-    history.toggle_pin(id)?;
+    history.toggle_pin(id, false)?;
     history.toggle_favorite(id)?;
     assert!(!history.edit_text(id, &hash, "hello", directory.path())?);
     assert!(

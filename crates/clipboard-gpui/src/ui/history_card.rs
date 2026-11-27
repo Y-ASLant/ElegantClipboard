@@ -101,7 +101,7 @@ impl ClipboardView {
         let card = drag_visual::HistoryCardSnapshot {
             is_image,
             is_files,
-            is_pinned: item.is_pinned,
+            is_pinned: item.pinned_in(self.history.favorite_only()),
             card_index: index,
             source_app_name: item.source_app_name.clone(),
             source_app_icon: item.source_app_icon.clone(),
@@ -239,7 +239,7 @@ impl ClipboardView {
                 let payload_owner = entity.clone();
                 let drag = HistoryDrag {
                     id,
-                    pinned: item.is_pinned,
+                    pinned: card.is_pinned,
                     favorite_only: self.history.favorite_only(),
                     group_id: self.history.group_id(),
                     generation: self.history.generation,

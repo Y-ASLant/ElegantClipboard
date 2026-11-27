@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS clipboard_items (
     image_height INTEGER,
     is_pinned INTEGER DEFAULT 0,
     is_favorite INTEGER DEFAULT 0,
+    is_favorite_pinned INTEGER NOT NULL DEFAULT 0,
     favorite_order INTEGER DEFAULT 0,
     sort_order INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now', 'localtime')),
@@ -130,10 +131,10 @@ CREATE INDEX IF NOT EXISTS idx_clipboard_group_list
     ON clipboard_items (group_id, is_pinned DESC, sort_order DESC, created_at DESC)
     WHERE group_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_clipboard_favorite_default_list
-    ON clipboard_items (is_pinned DESC, favorite_order DESC, sort_order DESC, created_at DESC)
+    ON clipboard_items (is_favorite_pinned DESC, favorite_order DESC, sort_order DESC, created_at DESC)
     WHERE is_favorite = 1 AND group_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_clipboard_favorite_group_list
-    ON clipboard_items (group_id, is_pinned DESC, favorite_order DESC, sort_order DESC, created_at DESC)
+    ON clipboard_items (group_id, is_favorite_pinned DESC, favorite_order DESC, sort_order DESC, created_at DESC)
     WHERE is_favorite = 1 AND group_id IS NOT NULL;
 
 -- Substring search. Trigram keeps ASCII case-folding close to SQLite LIKE.

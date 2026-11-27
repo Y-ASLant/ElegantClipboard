@@ -13,6 +13,9 @@ mod schema;
 pub use repository::*;
 pub use schema::*;
 
+#[cfg(test)]
+pub(crate) const V1_2_10_SCHEMA: &str = include_str!("v1_2_10.sql");
+
 use parking_lot::Mutex;
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use std::path::PathBuf;
@@ -82,13 +85,17 @@ impl Database {
     }
 
     fn init_schema(&self) -> Result<(), rusqlite::Error> {
-        let conn = self.write_conn.lock();
+        let mut conn = self.write_conn.lock();
 
-        let upgraded_from_1_2_10 = Self::run_migrations(&conn)?;
-        conn.execute_batch(SCHEMA_SQL)?;
+        // Reserve the writer before inspecting the schema: a concurrent capture
+        // can otherwise invalidate the WAL snapshot before the schema writes.
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let upgraded_from_1_2_10 = Self::run_migrations(&tx)?;
+        tx.execute_batch(SCHEMA_SQL)?;
         if upgraded_from_1_2_10 {
-            crate::legacy_migration::mark_cleanup_ui_needed(&conn)?;
+            crate::legacy_migration::mark_cleanup_ui_needed(&tx)?;
         }
+        tx.commit()?;
         Self::run_post_schema_migrations(&conn)?;
         info!("Database schema initialized");
 
@@ -101,25 +108,7 @@ impl Database {
         Self::backfill_categories(conn)?;
         Self::backfill_semantic_hashes(conn)?;
         Self::normalize_favorite_order(conn)?;
-        // 旧库可能仍是「任意列 UPDATE 都改 FTS」；与 timestamp 触发器叠在一起会 SQLITE_CORRUPT_INDEX。
-        Self::ensure_fts_update_trigger(conn)?;
         Self::rebuild_search_index_once(conn)?;
-        Ok(())
-    }
-
-    /// FTS 只跟踪正文/路径/备注；`CREATE TRIGGER IF NOT EXISTS` 不会替换旧定义。
-    fn ensure_fts_update_trigger(conn: &Connection) -> Result<(), rusqlite::Error> {
-        conn.execute_batch(
-            "DROP TRIGGER IF EXISTS clipboard_fts_au;
-             CREATE TRIGGER clipboard_fts_au
-             AFTER UPDATE OF text_content, file_paths, note ON clipboard_items
-             BEGIN
-                 INSERT INTO clipboard_fts(clipboard_fts, rowid, text_content, file_paths, note)
-                 VALUES ('delete', old.id, old.text_content, old.file_paths, old.note);
-                 INSERT INTO clipboard_fts(rowid, text_content, file_paths, note)
-                 VALUES (new.id, new.text_content, new.file_paths, new.note);
-             END;",
-        )?;
         Ok(())
     }
 

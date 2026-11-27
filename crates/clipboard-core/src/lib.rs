@@ -463,8 +463,9 @@ impl History {
         Ok(self.repo.set_favorite(id, favorite)?)
     }
 
-    pub fn toggle_pin(&self, id: i64) -> Result<bool> {
-        Ok(self.repo.toggle_pin(id)?)
+    /// 仅切换当前列表的置顶状态；记录已移出收藏时拒绝收藏列表的操作。
+    pub fn toggle_pin(&self, id: i64, favorite_only: bool) -> Result<bool> {
+        Ok(self.repo.toggle_pin(id, favorite_only)?)
     }
 
     /// 保存条目备注；空串清空备注。

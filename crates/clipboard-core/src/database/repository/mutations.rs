@@ -154,20 +154,16 @@ impl ClipboardRepository {
             params![name, icon, id],
         )? > 0)
     }
-    pub fn toggle_pin(&self, id: i64) -> Result<bool, rusqlite::Error> {
-        let conn = self.write_conn.lock();
-        conn.execute(
-            "UPDATE clipboard_items SET is_pinned = NOT is_pinned WHERE id = ?1",
-            params![id],
-        )?;
-
-        let pinned: bool = conn.query_row(
-            "SELECT is_pinned FROM clipboard_items WHERE id = ?1",
-            params![id],
-            |row| row.get(0),
-        )?;
-
-        Ok(pinned)
+    pub fn toggle_pin(&self, id: i64, favorite_only: bool) -> Result<bool, rusqlite::Error> {
+        let sql = if favorite_only {
+            "UPDATE clipboard_items SET is_favorite_pinned = NOT is_favorite_pinned
+             WHERE id = ?1 AND is_favorite = 1 RETURNING is_favorite_pinned"
+        } else {
+            "UPDATE clipboard_items SET is_pinned = NOT is_pinned WHERE id = ?1 RETURNING is_pinned"
+        };
+        self.write_conn
+            .lock()
+            .query_row(sql, params![id], |row| row.get(0))
     }
 
     pub fn toggle_favorite(&self, id: i64) -> Result<bool, rusqlite::Error> {
@@ -213,7 +209,7 @@ impl ClipboardRepository {
         } else {
             tx.execute(
                 "UPDATE clipboard_items
-                 SET is_favorite = 0, favorite_order = 0
+                 SET is_favorite = 0, favorite_order = 0, is_favorite_pinned = 0
                  WHERE id = ?1",
                 params![id],
             )?;

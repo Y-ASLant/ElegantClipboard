@@ -236,18 +236,7 @@ mod tests {
         let path = dir.path().join("legacy.db");
         {
             let conn = rusqlite::Connection::open(&path)?;
-            conn.execute_batch(
-                "CREATE TABLE clipboard_items (
-                    id INTEGER PRIMARY KEY,
-                    content_type TEXT, text_content TEXT, html_content TEXT, rtf_content TEXT,
-                    image_path TEXT, file_paths TEXT, file_payload TEXT,
-                    content_hash TEXT, semantic_hash TEXT, preview TEXT,
-                    byte_size INTEGER, image_width INTEGER, image_height INTEGER,
-                    is_pinned INTEGER, is_favorite INTEGER, favorite_order INTEGER, sort_order INTEGER,
-                    created_at TEXT, updated_at TEXT, access_count INTEGER, last_accessed_at TEXT,
-                    char_count INTEGER, source_app_name TEXT, source_app_icon TEXT, group_id INTEGER
-                );",
-            )?;
+            conn.execute_batch(crate::database::V1_2_10_SCHEMA)?;
         }
         let db = Database::new(path)?;
         let needed: i64 = db.write_connection().lock().query_row(

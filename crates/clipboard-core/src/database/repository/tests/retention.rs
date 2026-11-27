@@ -25,7 +25,7 @@ fn clear_history_preserves_pinned_and_favorites() {
     let id1 = repo.insert(make_text_item("normal")).unwrap();
     let id2 = repo.insert(make_text_item("pinned")).unwrap();
     let id3 = repo.insert(make_text_item("favorite")).unwrap();
-    repo.toggle_pin(id2).unwrap();
+    repo.toggle_pin(id2, false).unwrap();
     repo.toggle_favorite(id3).unwrap();
 
     let deleted = repo.clear_history(None, None).unwrap();
@@ -41,7 +41,7 @@ fn clear_all() {
     let repo = ClipboardRepository::new(&db);
     repo.insert(make_text_item("all1")).unwrap();
     let id2 = repo.insert(make_text_item("all2")).unwrap();
-    repo.toggle_pin(id2).unwrap();
+    repo.toggle_pin(id2, false).unwrap();
     repo.clear_all().unwrap();
     assert_eq!(repo.count(QueryOptions::default()).unwrap(), 0);
 }

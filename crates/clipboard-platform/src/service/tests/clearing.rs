@@ -52,7 +52,7 @@ fn clear_all_history_removes_protected_items_across_groups() -> Result<()> {
     let history = History::open(directory.path().join("clipboard.db"))?;
     let group = history.create_group("Keep group")?;
     let pinned = history.capture("pinned")?.unwrap();
-    history.toggle_pin(pinned)?;
+    history.toggle_pin(pinned, false)?;
     let favorite = history.capture("favorite")?.unwrap();
     history.toggle_favorite(favorite)?;
     history.move_to_group(favorite, None, Some(group.id))?;

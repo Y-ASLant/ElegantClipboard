@@ -373,10 +373,16 @@ mod tests {
     fn old_zip_rejects_duplicate_database_and_media_without_installing() -> Result<()> {
         let directory = tempfile::tempdir()?;
         let source = directory.path().join("source.db");
-        let history = History::open(source.clone())?;
-        let id = history.capture("preserved legacy text")?.unwrap();
-        crate::import::checkpoint_staged_database(&history.db.write_connection().lock())?;
-        drop(history);
+        let conn = Connection::open(&source)?;
+        conn.execute_batch(crate::database::V1_2_10_SCHEMA)?;
+        let id = conn.query_row(
+            "INSERT INTO clipboard_items (content_type, text_content, content_hash, semantic_hash,
+                                          is_pinned, is_favorite)
+             VALUES ('text', 'preserved legacy text', 'a', 'a', 1, 1) RETURNING id",
+            [],
+            |r| r.get::<_, i64>(0),
+        )?;
+        drop(conn);
         let database = fs::read(source)?;
 
         let valid = directory.path().join("valid.zip");
@@ -392,10 +398,10 @@ mod tests {
         fs::create_dir_all(&control)?;
         let report = import_legacy_backup(&valid, &control).context("valid ZIP control failed")?;
         assert_eq!(report.items.total_items, 1);
-        assert_eq!(
-            History::open(control.join("clipboard.db"))?.text(id)?,
-            "preserved legacy text"
-        );
+        let history = History::open(control.join("clipboard.db"))?;
+        assert_eq!(history.text(id)?, "preserved legacy text");
+        let item = history.item(id)?;
+        assert!(item.is_pinned && item.is_favorite_pinned);
 
         for (index, duplicate) in [
             "clipboard.db",

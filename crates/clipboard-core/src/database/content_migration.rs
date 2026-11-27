@@ -5,16 +5,6 @@ use tracing::info;
 
 impl Database {
     pub(super) fn backfill_categories(conn: &Connection) -> Result<(), rusqlite::Error> {
-        let exists: bool = conn.query_row(
-            "SELECT COUNT(*) > 0 FROM pragma_table_info('clipboard_items') WHERE name = 'categories'",
-            [],
-            |row| row.get(0),
-        )?;
-        if !exists {
-            conn.execute_batch(
-                "ALTER TABLE clipboard_items ADD COLUMN categories INTEGER NOT NULL DEFAULT 0;",
-            )?;
-        }
         let done: bool = conn
             .query_row(
                 "SELECT COALESCE((SELECT value FROM settings WHERE key = '_migration_categories' LIMIT 1), '') = '1'",
@@ -136,6 +126,7 @@ impl Database {
              CREATE TABLE clipboard_items_new (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 content_type TEXT NOT NULL,
+                categories INTEGER NOT NULL DEFAULT 0,
                 text_content TEXT,
                 html_content TEXT,
                 rtf_content TEXT,
@@ -150,6 +141,7 @@ impl Database {
                 image_height INTEGER,
                 is_pinned INTEGER DEFAULT 0,
                 is_favorite INTEGER DEFAULT 0,
+                is_favorite_pinned INTEGER NOT NULL DEFAULT 0,
                 favorite_order INTEGER DEFAULT 0,
                 sort_order INTEGER DEFAULT 0,
                 created_at TEXT DEFAULT (datetime('now', 'localtime')),
@@ -163,11 +155,11 @@ impl Database {
                 group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE
             );
             INSERT INTO clipboard_items_new
-            SELECT id, content_type, text_content, html_content, rtf_content,
+            SELECT id, content_type, categories, text_content, html_content, rtf_content,
                    image_path, file_paths, file_payload, content_hash,
                    COALESCE(NULLIF(semantic_hash, ''), content_hash),
                    preview, byte_size, image_width, image_height,
-                   is_pinned, is_favorite, favorite_order, sort_order,
+                   is_pinned, is_favorite, is_favorite_pinned, favorite_order, sort_order,
                    created_at, updated_at, access_count, last_accessed_at,
                    char_count, source_app_name, source_app_icon, note, group_id
             FROM clipboard_items;

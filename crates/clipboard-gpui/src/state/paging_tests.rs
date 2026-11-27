@@ -17,6 +17,7 @@ fn paging_item(id: i64) -> clipboard_core::database::ClipboardItem {
         image_width: None,
         image_height: None,
         is_pinned: false,
+        is_favorite_pinned: false,
         is_favorite: false,
         favorite_order: 0,
         sort_order: 0,

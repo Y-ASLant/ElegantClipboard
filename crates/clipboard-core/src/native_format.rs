@@ -197,7 +197,7 @@ impl History {
         let mut staged = stage_blobs(&accepted, &blob_root)?;
         let connection = self.db.write_connection();
         let mut connection = connection.lock();
-        let tx = connection.transaction()?;
+        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let exists: Option<i64> = tx
             .query_row(
                 "SELECT id FROM clipboard_items WHERE id = ?1",

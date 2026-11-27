@@ -381,10 +381,10 @@ mod tests {
             )?;
             ids.push(id);
         }
-        history.toggle_pin(ids[0])?;
+        history.toggle_pin(ids[0], false)?;
         assert_eq!(history.clear_history_with_media(None, &images)?.deleted, 1);
         assert!(staged.exists());
-        history.toggle_pin(ids[0])?;
+        history.toggle_pin(ids[0], false)?;
         assert_eq!(history.clear_history_with_media(None, &images)?.deleted, 1);
         assert!(!staged.exists());
         Ok(())

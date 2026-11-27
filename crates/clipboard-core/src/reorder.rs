@@ -14,10 +14,10 @@ pub fn move_item(
     let connection = db.write_connection();
     let mut connection = connection.lock();
     let tx = connection.transaction()?;
-    let column = if favorites {
-        "favorite_order"
+    let (pin_column, column) = if favorites {
+        ("is_favorite_pinned", "favorite_order")
     } else {
-        "sort_order"
+        ("is_pinned", "sort_order")
     };
     let filter = if favorites { "AND is_favorite = 1" } else { "" };
     let group_filter = if group_id.is_some() {
@@ -27,9 +27,9 @@ pub fn move_item(
     };
     let mut rows: Vec<(i64, bool)> = {
         let mut query = tx.prepare(&format!(
-            "SELECT id, is_pinned FROM clipboard_items
+            "SELECT id, {pin_column} FROM clipboard_items
              WHERE {group_filter} AND content_type IN ('text', 'url', 'html', 'rtf', 'image', 'files') {filter}
-             ORDER BY is_pinned DESC, {column} DESC, sort_order DESC, created_at DESC, id DESC"
+             ORDER BY {pin_column} DESC, {column} DESC, sort_order DESC, created_at DESC, id DESC"
         ))?;
         query
             .query_map(rusqlite::params_from_iter(group_id), |row| {
@@ -48,7 +48,7 @@ pub fn move_item(
     }
     if source_pinned != target_pinned {
         tx.execute(
-            "UPDATE clipboard_items SET is_pinned = ?1 WHERE id = ?2",
+            &format!("UPDATE clipboard_items SET {pin_column} = ?1 WHERE id = ?2"),
             params![target_pinned, from],
         )?;
     }
@@ -136,7 +136,7 @@ mod tests {
         history.reorder(a, d, false, true)?;
         assert_eq!(ids(&history, true)?, vec![a, d, c]);
         assert_eq!(ids(&history, false)?, vec![d, c, b, a]);
-        history.toggle_pin(d)?;
+        history.toggle_pin(d, false)?;
         history.reorder(a, d, false, false)?;
         assert_eq!(ids(&history, false)?, vec![a, d, c, b]);
         assert!(history.item(a)?.is_pinned);
@@ -159,10 +159,11 @@ mod tests {
         let first = history.capture("first")?.unwrap();
         let second = history.capture("second")?.unwrap();
         let pinned = history.capture("pinned")?.unwrap();
-        history.toggle_pin(pinned)?;
+        history.toggle_pin(pinned, false)?;
         for id in [first, second, pinned] {
             history.toggle_favorite(id)?;
         }
+        history.toggle_pin(pinned, true)?;
 
         history.reorder(first, pinned, false, true)?;
         let favorites = history.list("", PAGE_SIZE, true)?;
@@ -170,9 +171,14 @@ mod tests {
             favorites.iter().map(|item| item.id).collect::<Vec<_>>(),
             vec![first, pinned, second]
         );
-        assert!(history.item(first)?.is_pinned);
+        let moved = history.item(first)?;
+        assert!(moved.is_favorite_pinned);
+        assert!(!moved.is_pinned);
 
-        history.toggle_pin(first)?;
+        history.reorder(pinned, second, true, true)?;
+        let moved = history.item(pinned)?;
+        assert!(!moved.is_favorite_pinned);
+        assert!(moved.is_pinned);
         let before = history.list("", PAGE_SIZE, false)?;
         history
             .db
@@ -184,6 +190,7 @@ mod tests {
             ))?;
         assert!(history.reorder(first, pinned, false, false).is_err());
         assert!(!history.item(first)?.is_pinned);
+        assert!(history.item(first)?.is_favorite_pinned);
         assert_eq!(
             history
                 .list("", PAGE_SIZE, false)?

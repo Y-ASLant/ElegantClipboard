@@ -64,16 +64,33 @@ fn delete_item() {
 }
 
 #[test]
-fn toggle_pin() {
+fn pin_states_are_independent_and_favorite_pin_ends_with_membership() {
     let (_dir, db) = temp_db();
     let repo = ClipboardRepository::new(&db);
     let id = repo.insert(make_text_item("pin_test")).unwrap();
-    assert!(!repo.get_by_id(id).unwrap().unwrap().is_pinned);
-    let pinned = repo.toggle_pin(id).unwrap();
-    assert!(pinned);
-    assert!(repo.get_by_id(id).unwrap().unwrap().is_pinned);
-    let unpinned = repo.toggle_pin(id).unwrap();
-    assert!(!unpinned);
+    let pins = || {
+        let item = repo.get_by_id(id).unwrap().unwrap();
+        (item.pinned_in(false), item.pinned_in(true))
+    };
+    assert_eq!(pins(), (false, false));
+    assert!(repo.toggle_pin(id, true).is_err());
+    assert!(repo.toggle_pin(id, false).unwrap());
+    assert!(repo.set_favorite(id, true).unwrap());
+    assert_eq!(pins(), (true, false));
+    assert!(repo.toggle_pin(id, true).unwrap());
+    assert!(!repo.set_favorite(id, true).unwrap());
+    assert_eq!(pins(), (true, true));
+    assert!(!repo.toggle_pin(id, false).unwrap());
+    assert_eq!(pins(), (false, true));
+    assert!(!repo.toggle_pin(id, true).unwrap());
+    assert_eq!(pins(), (false, false));
+
+    assert!(repo.toggle_pin(id, false).unwrap());
+    assert!(repo.toggle_pin(id, true).unwrap());
+    assert!(repo.set_favorite(id, false).unwrap());
+    assert_eq!(pins(), (true, false));
+    assert!(repo.toggle_favorite(id).unwrap());
+    assert_eq!(pins(), (true, false));
 }
 
 #[test]
@@ -112,7 +129,7 @@ fn bump_to_top_skips_pinned() {
     let (_dir, db) = temp_db();
     let repo = ClipboardRepository::new(&db);
     let id = repo.insert(make_text_item("pinned_bump")).unwrap();
-    repo.toggle_pin(id).unwrap();
+    repo.toggle_pin(id, false).unwrap();
     let original_sort = repo.get_by_id(id).unwrap().unwrap().sort_order;
     repo.bump_to_top(id).unwrap();
     assert_eq!(

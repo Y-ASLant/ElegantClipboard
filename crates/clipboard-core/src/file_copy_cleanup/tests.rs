@@ -60,7 +60,7 @@ fn cleanup_preserves_history_metadata_other_settings_and_image_storage() -> Resu
     }
     let group = history.create_group("kept group")?;
     history.move_to_group(file, None, Some(group.id))?;
-    history.toggle_pin(file)?;
+    history.toggle_pin(file, false)?;
     history.toggle_favorite(file)?;
     history.set_note(file, "kept note")?;
     history.set_source_app(file, "kept app", Some("kept-icon"))?;

@@ -134,28 +134,37 @@ mod tests {
         let directory = tempfile::tempdir()?;
         let source_path = directory.path().join("old/clipboard.db");
         let destination = directory.path().join("new/clipboard.db");
-        let old = Database::new(source_path.clone())?;
-        let history = History::new(&old);
-        let id = history.capture("原来的收藏文本")?.unwrap();
-        history.toggle_favorite(id)?;
-        history.toggle_pin(id)?;
-        old.write_connection().lock().execute_batch(
+        std::fs::create_dir_all(source_path.parent().unwrap())?;
+        let old = Connection::open(&source_path)?;
+        old.execute_batch("PRAGMA journal_mode = WAL")?;
+        old.execute_batch(crate::database::V1_2_10_SCHEMA)?;
+        let id = old.query_row(
+            "INSERT INTO clipboard_items (content_type, text_content, preview, content_hash,
+                semantic_hash, is_favorite, is_pinned) VALUES ('text', ?1, ?1, 'a', 'a', 1, 1)
+             RETURNING id",
+            ["原来的收藏文本"],
+            |r| r.get::<_, i64>(0),
+        )?;
+        old.execute_batch(
             "INSERT INTO settings (key, value) VALUES
              ('secret_token', 'legacy-secret'),
              ('gpui_theme_mode', 'dark')",
         )?;
-        old.write_connection().lock().execute(
+        old.execute(
             "INSERT INTO clipboard_items (content_type, content_hash, semantic_hash, image_path) VALUES ('image', 'image-hash', 'image-hash', 'C:/old/image.png')",
             [],
         )?;
         let report = import_legacy_database(&source_path, &destination)?;
         assert_eq!(report.total_items, 2);
-        assert_eq!(history.count("", false)?, 2);
+        let source_rows: i64 =
+            old.query_row("SELECT COUNT(*) FROM clipboard_items", [], |r| r.get(0))?;
+        assert_eq!(source_rows, 2);
         let imported = History::open(destination.clone())?;
         assert_eq!(imported.text(id)?, "原来的收藏文本");
         let items = imported.list("", PAGE_SIZE, true)?;
         assert_eq!(items.len(), 1);
         assert!(items[0].is_pinned);
+        assert!(items[0].is_favorite_pinned);
         assert!(items[0].is_favorite);
         let imported_db = Database::new(destination.clone())?;
         let settings = imported_db.read_connection();
@@ -187,7 +196,7 @@ mod tests {
             !imported_keys.iter().any(|key| key == "gpui_theme_mode"),
             "legacy/gpui preference rows must not import: {imported_keys:?}"
         );
-        let source_secret_count: i64 = old.write_connection().lock().query_row(
+        let source_secret_count: i64 = old.query_row(
             "SELECT COUNT(*) FROM settings WHERE key = 'secret_token'",
             [],
             |row| row.get(0),

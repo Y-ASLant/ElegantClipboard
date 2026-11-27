@@ -263,7 +263,9 @@ enum HistoryMenuAction {
     Reveal,
     SaveAs(String),
     ToggleFavorite,
-    TogglePin,
+    TogglePin {
+        favorite_only: bool,
+    },
     MoveToGroup,
     /// 进入多选并勾选本条（非整表全选）。
     Select,

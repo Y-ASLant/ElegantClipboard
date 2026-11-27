@@ -136,7 +136,7 @@ fn moving_items_between_groups_preserves_history_and_rejects_stale_source() -> R
     let history = History::open(dir.path().join("clipboard.db"))?;
     let id = history.capture("important text")?.unwrap();
     history.toggle_favorite(id)?;
-    history.toggle_pin(id)?;
+    history.toggle_pin(id, false)?;
     let work = history.create_group("工作")?;
     let archive = history.create_group("归档")?;
     assert!(history.move_to_group(id, None, Some(-1)).is_err());
@@ -340,7 +340,7 @@ fn literal_search_pin_delete_and_limits() -> Result<()> {
     let id = history.capture("100%_done")?.unwrap();
     history.capture("plain text")?;
     assert_eq!(history.count("%_", false)?, 1);
-    history.toggle_pin(id)?;
+    history.toggle_pin(id, false)?;
     assert_eq!(history.list("", PAGE_SIZE, false)?[0].id, id);
     assert_eq!(history.capture(" \r\n")?, None);
     assert!(history.capture(&"x".repeat(MAX_TEXT_BYTES + 1)).is_err());

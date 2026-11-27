@@ -232,7 +232,7 @@ fn get_by_position() {
     let pinned = repo.insert(make_text_item("pinned")).unwrap();
     let favorite = repo.insert(make_text_item("favorite")).unwrap();
     let recent = repo.insert(make_text_item("recent")).unwrap();
-    repo.toggle_pin(pinned).unwrap();
+    repo.toggle_pin(pinned, false).unwrap();
     repo.toggle_favorite(pinned).unwrap();
     repo.toggle_favorite(favorite).unwrap();
     let group = GroupRepository::new(&db).create("positions").unwrap();
@@ -250,16 +250,29 @@ fn get_by_position() {
         .unwrap();
     repo.toggle_favorite(grouped_recent).unwrap();
     repo.toggle_favorite(grouped_old).unwrap();
+    repo.toggle_pin(grouped_recent, true).unwrap();
+    repo.toggle_pin(grouped_old, false).unwrap();
 
     for (group_id, expected_recent, expected_favorites) in [
-        (None, vec![pinned, recent, favorite], vec![pinned, favorite]),
+        (None, vec![pinned, recent, favorite], vec![favorite, pinned]),
         (
             Some(group.id),
-            vec![grouped_recent, grouped_old],
             vec![grouped_old, grouped_recent],
+            vec![grouped_recent, grouped_old],
         ),
     ] {
         for (favorite_only, expected) in [(false, expected_recent), (true, expected_favorites)] {
+            let list = repo
+                .list(QueryOptions {
+                    favorite_only,
+                    group_id,
+                    ..Default::default()
+                })
+                .unwrap();
+            assert_eq!(
+                list.iter().map(|item| item.id).collect::<Vec<_>>(),
+                expected
+            );
             for index in 0..=expected.len() {
                 let expected_id = expected.get(index).copied();
                 let id = if favorite_only {
@@ -283,7 +296,7 @@ fn get_by_position() {
         .unwrap();
     assert_eq!(repo.get_id_by_position(0, None).unwrap(), Some(pinned));
     assert_eq!(
-        repo.get_favorite_id_by_position(0, None).unwrap(),
+        repo.get_favorite_id_by_position(1, None).unwrap(),
         Some(pinned)
     );
     assert!(repo.get_by_id(pinned).is_err());

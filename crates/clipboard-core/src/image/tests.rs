@@ -87,7 +87,7 @@ fn clear_history_is_group_scoped_and_preserves_protected_items() -> Result<()> {
     history.toggle_favorite(favorite)?;
     let pinned = history.capture("keep pinned")?.unwrap();
     history.move_to_group(pinned, None, Some(group.id))?;
-    history.toggle_pin(pinned)?;
+    history.toggle_pin(pinned, false)?;
     let default_text = history.capture("keep default")?.unwrap();
 
     assert_eq!(
@@ -119,7 +119,7 @@ fn clear_all_removes_protected_records_and_media_but_keeps_groups_and_settings()
 
     let group = history.create_group("Keep group")?;
     let protected = history.capture("protected")?.unwrap();
-    history.toggle_pin(protected)?;
+    history.toggle_pin(protected, false)?;
     history.toggle_favorite(protected)?;
     let grouped = history.capture("grouped")?.unwrap();
     history.move_to_group(grouped, None, Some(group.id))?;
@@ -231,7 +231,7 @@ fn batch_delete_is_atomic_and_cleans_only_selected_media() -> Result<()> {
     let image = history.capture_image(PNG, 3, 2, &images)?;
     let image_path = PathBuf::from(history.item(image)?.image_path.unwrap());
     history.move_to_group(image, None, Some(group.id))?;
-    history.toggle_pin(image)?;
+    history.toggle_pin(image, false)?;
 
     let staged_dir = directory.path().join("staged");
     std::fs::create_dir_all(&staged_dir)?;

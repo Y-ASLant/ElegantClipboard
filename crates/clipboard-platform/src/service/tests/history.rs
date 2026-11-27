@@ -113,7 +113,10 @@ fn reorder_acknowledges_success_and_rejects_stale_view() -> Result<()> {
             },
         );
     }
-    service.send(Command::TogglePin(second))?;
+    service.send(Command::TogglePin {
+        id: second,
+        favorite_only: false,
+    })?;
     let rows = next_snapshot(&events, 0);
     assert!(rows[0].is_pinned);
     assert_eq!(rows[0].id, second);
@@ -265,7 +268,7 @@ fn worker_set_favorite_add_is_idempotent_and_preserves_history_order() -> Result
     let group = history.create_group("Drop target fixture")?;
     let id = history.capture("favorite %_ in group")?.unwrap();
     history.move_to_group(id, None, Some(group.id))?;
-    history.toggle_pin(id)?;
+    history.toggle_pin(id, false)?;
     let before = history.item(id)?;
     drop(history);
 
@@ -330,7 +333,7 @@ fn worker_set_favorite_remove_preserves_the_pinned_record() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let history = History::open(directory.path().join("clipboard.db"))?;
     let id = history.capture("pinned favorite text")?.unwrap();
-    history.toggle_pin(id)?;
+    history.toggle_pin(id, false)?;
     history.toggle_favorite(id)?;
     let before = history.item(id)?;
     drop(history);

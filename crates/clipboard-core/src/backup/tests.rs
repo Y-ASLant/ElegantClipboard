@@ -18,10 +18,13 @@ fn live_backup_restores_text_groups_images_and_gpui_settings() -> Result<()> {
     let history = History::open(path)?;
     let id = history.capture("backup text")?.unwrap();
     history.toggle_favorite(id)?;
+    history.toggle_pin(id, true)?;
     let group = history.create_group("工作")?;
     history.move_to_group(id, None, Some(group.id))?;
     let png = b"\x89PNG\r\n\x1a\nsynthetic";
     let image = history.capture_image(png, 3, 2, &source.join("images"))?;
+    history.toggle_favorite(image)?;
+    history.toggle_pin(image, false)?;
     let icon = source.join("icons/app.ico");
     fs::create_dir_all(icon.parent().unwrap())?;
     fs::write(&icon, b"icon bytes")?;
@@ -76,7 +79,10 @@ fn live_backup_restores_text_groups_images_and_gpui_settings() -> Result<()> {
     assert!(!target.join("staged").exists());
     let restored = History::open(target.join("clipboard.db"))?;
     assert_eq!(restored.groups()?[0].name, "工作");
-    assert!(restored.item(id)?.is_favorite);
+    let text_item = restored.item(id)?;
+    assert!(text_item.is_favorite && text_item.is_favorite_pinned && !text_item.is_pinned);
+    let image_item = restored.item(image)?;
+    assert!(image_item.is_favorite && !image_item.is_favorite_pinned && image_item.is_pinned);
     assert_eq!(restored.text(id)?, "backup text");
     assert_eq!(
         Preferences::new(&restored.db).theme()?,
@@ -137,6 +143,8 @@ fn restores_previous_gpui_v1_backup() -> Result<()> {
     let source_path = dir.path().join("source.db");
     let history = History::open(source_path.clone())?;
     let id = history.capture("v1 text")?.unwrap();
+    history.toggle_favorite(id)?;
+    history.toggle_pin(id, false)?;
     history.db.write_connection().lock().execute(
         "INSERT INTO settings (key, value) VALUES ('secret_token', 'legacy-secret')",
         [],
@@ -165,10 +173,10 @@ fn restores_previous_gpui_v1_backup() -> Result<()> {
     let report = restore_backup(&previous, &target)?;
     assert_eq!(report.total_items, 1);
     assert_eq!(report.restored_icons, 0);
-    assert_eq!(
-        History::open(target.join("clipboard.db"))?.text(id)?,
-        "v1 text"
-    );
+    let restored = History::open(target.join("clipboard.db"))?;
+    assert_eq!(restored.text(id)?, "v1 text");
+    let item = restored.item(id)?;
+    assert!(item.is_pinned && !item.is_favorite_pinned);
     let restored_db = Connection::open(target.join("clipboard.db"))?;
     let secret_count: i64 = restored_db.query_row(
         "SELECT COUNT(*) FROM settings WHERE key = 'secret_token'",
@@ -176,6 +184,62 @@ fn restores_previous_gpui_v1_backup() -> Result<()> {
         |row| row.get(0),
     )?;
     assert_eq!(secret_count, 0);
+    Ok(())
+}
+
+#[test]
+fn unreleased_shared_pin_schema_is_not_opened_imported_or_restored() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let source = dir.path().join("development.db");
+    let history = History::open(source.clone())?;
+    let id = history.capture("keep original")?.unwrap();
+    drop(history);
+    let conn = Connection::open(&source)?;
+    conn.execute_batch(
+        "DROP INDEX idx_clipboard_favorite_default_list;
+         DROP INDEX idx_clipboard_favorite_group_list;
+         ALTER TABLE clipboard_items DROP COLUMN is_favorite_pinned;",
+    )?;
+    drop(conn);
+
+    assert!(History::open(source.clone()).is_err());
+    let destination = dir.path().join("import.db");
+    assert!(crate::import::import_legacy_database(&source, &destination).is_err());
+    assert!(!destination.exists());
+    for gpui in [false, true] {
+        let archive = dir.path().join(format!("backup-{gpui}.zip"));
+        let mut zip = ZipWriter::new(File::create(&archive)?);
+        if gpui {
+            zip.start_file("manifest.json", SimpleFileOptions::default())?;
+            zip.write_all(
+                br#"{"format":"elegantclipboard-gpui","version":2,"total_items":1,"missing_images":0}"#,
+            )?;
+        }
+        zip.start_file("clipboard.db", SimpleFileOptions::default())?;
+        io::copy(&mut File::open(&source)?, &mut zip)?;
+        zip.finish()?;
+        let target = dir.path().join(format!("restored-{gpui}"));
+        fs::create_dir(&target)?;
+        if gpui {
+            assert!(restore_backup(&archive, &target).is_err());
+        } else {
+            assert!(crate::legacy_backup::import_legacy_backup(&archive, &target).is_err());
+        }
+        assert_eq!(fs::read_dir(target)?.count(), 0);
+    }
+    let conn = Connection::open(&source)?;
+    let text: String = conn.query_row(
+        "SELECT text_content FROM clipboard_items WHERE id = ?1",
+        [id],
+        |row| row.get(0),
+    )?;
+    assert_eq!(text, "keep original");
+    let pin_columns: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('clipboard_items') WHERE name = 'is_favorite_pinned'",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(pin_columns, 0);
     Ok(())
 }
 

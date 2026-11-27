@@ -185,7 +185,10 @@ pub enum Command {
         generation: u64,
     },
     ClearAllHistory,
-    TogglePin(i64),
+    TogglePin {
+        id: i64,
+        favorite_only: bool,
+    },
     ToggleFavorite(i64),
     SetFavorite {
         id: i64,

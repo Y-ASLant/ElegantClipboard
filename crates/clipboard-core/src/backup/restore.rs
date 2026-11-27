@@ -157,8 +157,15 @@ pub fn restore_backup_with_progress(
     if total_items != manifest.total_items {
         bail!("备份记录数量与格式说明不一致");
     }
-    crate::import::checkpoint_staged_database(&restored_db)?;
     drop(restored_db);
+    // Upgrade old snapshots in staging so migration failures cannot install a broken database.
+    {
+        let staged =
+            crate::database::Database::new(staged_db.clone()).context("无法打开已恢复的数据库")?;
+        // 备份未带 gpui_retention 时，禁止回落采集默认 10000 条上限。
+        crate::History::new(&staged).preserve_imported_history_limits()?;
+        crate::import::checkpoint_staged_database(&staged.write_connection().lock())?;
+    }
 
     progress(92.0, "安装到数据目录");
     install_staged_tree(
@@ -168,10 +175,6 @@ pub fn restore_backup_with_progress(
         "无法安装备份媒体文件",
         "无法安装备份数据库",
     )?;
-    // 备份未带 gpui_retention 时，禁止回落采集默认 10000 条上限。
-    let installed = crate::database::Database::new(data_dir.join("clipboard.db"))
-        .context("无法打开已恢复的数据库")?;
-    crate::History::new(&installed).preserve_imported_history_limits()?;
     progress(100.0, "恢复完成");
     Ok(RestoreReport {
         total_items,

@@ -11,7 +11,7 @@ fn limits_are_per_group_and_protect_pinned_and_favorite_items() -> Result<()> {
     history.move_to_group(grouped_old, None, Some(group.id))?;
     let pin = history.capture("pin")?.unwrap();
     let favorite = history.capture("favorite")?.unwrap();
-    history.toggle_pin(pin)?;
+    history.toggle_pin(pin, false)?;
     history.toggle_favorite(favorite)?;
     let default_new = history.capture("default new")?.unwrap();
     let grouped_new = history.capture("group new")?.unwrap();

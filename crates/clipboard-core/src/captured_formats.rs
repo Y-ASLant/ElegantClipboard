@@ -23,7 +23,7 @@ impl History {
 
         let connection = self.db.write_connection();
         let mut connection = connection.lock();
-        let tx = connection.transaction()?;
+        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let exists: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM clipboard_items WHERE id = ?1)",
             [item_id],

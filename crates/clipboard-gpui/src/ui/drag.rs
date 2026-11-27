@@ -58,7 +58,9 @@ impl ClipboardView {
                 .items
                 .get(drag.card.card_index)
                 .and_then(Option::as_ref)
-                .is_some_and(|item| item.id == drag.id && item.is_pinned == drag.pinned)
+                .is_some_and(|item| {
+                    item.id == drag.id && item.pinned_in(drag.favorite_only) == drag.pinned
+                })
     }
 
     pub(super) fn favorite_history_drag_active(&self, cx: &App) -> bool {
@@ -129,7 +131,7 @@ impl ClipboardView {
                 items
                     .get(index)
                     .and_then(Option::as_ref)
-                    .map(|item| (item.id, item.is_pinned))
+                    .map(|item| (item.id, item.pinned_in(drag.favorite_only)))
             },
             &self.row_offsets,
             content_y,
@@ -156,11 +158,9 @@ impl ClipboardView {
             self.is_error = true;
         } else if let Some(target) = target.filter(|target| {
             target.id != drag.id
-                && self
-                    .history
-                    .items
-                    .loaded()
-                    .any(|(_, item)| item.id == target.id && item.is_pinned == drag.pinned)
+                && self.history.items.loaded().any(|(_, item)| {
+                    item.id == target.id && item.pinned_in(drag.favorite_only) == drag.pinned
+                })
         }) && self.send(
             Command::Reorder {
                 from: drag.id,
@@ -259,12 +259,13 @@ impl ClipboardView {
                                     .find_map(|(_, item)| (item.id == id).then_some(item))
                             })?
                         };
-                        (source.id != target.id && source.is_pinned == target.is_pinned).then_some(
-                            DropTarget {
-                                id: target.id,
-                                after: this.card_drag_direction > 0,
-                            },
-                        )
+                        let favorites = this.history.favorite_only();
+                        (source.id != target.id
+                            && source.pinned_in(favorites) == target.pinned_in(favorites))
+                        .then_some(DropTarget {
+                            id: target.id,
+                            after: this.card_drag_direction > 0,
+                        })
                     })
                     .or(this.drop_target);
                     if next != current || this.drop_target != target {

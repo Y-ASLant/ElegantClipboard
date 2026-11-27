@@ -61,7 +61,7 @@ pub fn delete_preserving_items(db: &Database, group_id: i64) -> Result<usize> {
     let favorite_ids: Vec<i64> = {
         let mut query = tx.prepare(
             "SELECT id FROM clipboard_items WHERE group_id = ?1 AND is_favorite = 1
-             ORDER BY is_pinned DESC, favorite_order DESC, sort_order DESC, id DESC",
+             ORDER BY is_favorite_pinned DESC, favorite_order DESC, sort_order DESC, id DESC",
         )?;
         query
             .query_map(params![group_id], |row| row.get(0))?

@@ -190,8 +190,8 @@ impl Worker {
                 };
                 self.send_event(Event::Status(message.into()))?;
             }
-            Command::TogglePin(id) => {
-                self.history.toggle_pin(id)?;
+            Command::TogglePin { id, favorite_only } => {
+                self.history.toggle_pin(id, favorite_only)?;
             }
             Command::BumpToTop(id) => {
                 self.history.bump_to_top(id)?;

@@ -22,7 +22,7 @@ pub(super) fn history_menu_item(
         HistoryMenuAction::CopyAsFile | HistoryMenuAction::SaveAs(_) => IconName::File,
         HistoryMenuAction::Reveal => IconName::ExternalLink,
         HistoryMenuAction::ToggleFavorite => IconName::Heart,
-        HistoryMenuAction::TogglePin => IconName::Pin,
+        HistoryMenuAction::TogglePin { .. } => IconName::Pin,
         HistoryMenuAction::MoveToGroup => IconName::Folder,
         HistoryMenuAction::Select => IconName::Check,
         HistoryMenuAction::Locate => IconName::ClipboardList,
@@ -175,8 +175,8 @@ impl ClipboardView {
                     self.start_favorite_flash(id, cx);
                 }
             }
-            HistoryMenuAction::TogglePin => {
-                self.send(Command::TogglePin(id), cx);
+            HistoryMenuAction::TogglePin { favorite_only } => {
+                self.toggle_history_pin(id, *favorite_only, cx);
             }
             HistoryMenuAction::MoveToGroup => {
                 if !self.group_move_pending {
@@ -223,7 +223,8 @@ impl ClipboardView {
         let is_rich_item = kind.is_some_and(|kind| kind.is_rich());
         let is_text_item = matches!(item.content_type.as_str(), "text" | "url");
         let favorite = item.is_favorite;
-        let pinned = item.is_pinned;
+        let favorite_only = self.history.favorite_only();
+        let pinned = item.pinned_in(favorite_only);
         let entity = cx.entity();
         let text_like = kind.is_some_and(|kind| kind.is_text_like());
         let language = self.language;
@@ -435,7 +436,7 @@ impl ClipboardView {
                                     false,
                                     entity.clone(),
                                     id,
-                                    HistoryMenuAction::TogglePin,
+                                    HistoryMenuAction::TogglePin { favorite_only },
                                 )
                                 .checked(pinned),
                             )
