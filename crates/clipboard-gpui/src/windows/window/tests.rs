@@ -10,8 +10,7 @@ use windows::{
         Graphics::Gdi::ClientToScreen,
         UI::WindowsAndMessaging::{
             CreateWindowExW, DestroyWindow, GWL_EXSTYLE, GetClientRect, GetWindowLongPtrW,
-            GetWindowRect, HWND_TOPMOST, IsWindowVisible, MA_ACTIVATE, MA_NOACTIVATE,
-            SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SendMessageW, SetWindowPos, WA_ACTIVE,
+            GetWindowRect, IsWindowVisible, MA_ACTIVATE, MA_NOACTIVATE, SendMessageW, WA_ACTIVE,
             WA_INACTIVE, WINDOW_EX_STYLE, WM_ACTIVATE, WS_EX_NOACTIVATE, WS_EX_TOPMOST,
             WS_OVERLAPPEDWINDOW,
         },
@@ -23,9 +22,13 @@ struct HiddenWindow(HWND);
 
 impl HiddenWindow {
     fn new(title: windows::core::PCWSTR) -> anyhow::Result<Self> {
+        Self::with_style(title, WINDOW_EX_STYLE::default())
+    }
+
+    fn with_style(title: windows::core::PCWSTR, style: WINDOW_EX_STYLE) -> anyhow::Result<Self> {
         let hwnd = unsafe {
             CreateWindowExW(
-                WINDOW_EX_STYLE::default(),
+                style,
                 w!("STATIC"),
                 title,
                 WS_OVERLAPPEDWINDOW,
@@ -277,19 +280,13 @@ fn mouse_activate_rescales_logical_search_bounds_across_dpi_changes() -> anyhow:
 #[test]
 fn failed_activate_for_input_restores_noactivate_only_for_suppressed_windows() -> anyhow::Result<()>
 {
-    let suppressed = HiddenWindow::new(w!("Isolated failed activation suppressed test"))?;
+    // Establish the starting style at creation; the test is about activation
+    // rollback, not whether a hidden window can be reordered on the CI desktop.
+    let suppressed = HiddenWindow::with_style(
+        w!("Isolated failed activation suppressed test"),
+        WS_EX_TOPMOST,
+    )?;
     suppress_click_activation(suppressed.0.0 as isize)?;
-    unsafe {
-        SetWindowPos(
-            suppressed.0,
-            Some(HWND_TOPMOST),
-            0,
-            0,
-            0,
-            0,
-            SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
-        )?;
-    }
     assert!(suppressed.has_ex_style(WS_EX_NOACTIVATE));
     assert!(suppressed.has_ex_style(WS_EX_TOPMOST));
 
@@ -317,24 +314,13 @@ fn failed_activate_for_input_restores_noactivate_only_for_suppressed_windows() -
 #[test]
 fn activate_deactivate_reshow_and_destroy_maintain_noactivate_and_topmost_state()
 -> anyhow::Result<()> {
-    let window = HiddenWindow::new(w!("Isolated activation lifecycle test"))?;
+    let window = HiddenWindow::with_style(w!("Isolated activation lifecycle test"), WS_EX_TOPMOST)?;
     let handle = window.0.0 as isize;
     suppress_click_activation(handle)?;
     assert!(is_click_suppression_enabled(handle));
     assert!(window.has_ex_style(WS_EX_NOACTIVATE));
 
     // Simulate topmost floating panel becoming active: topmost band must drop.
-    unsafe {
-        SetWindowPos(
-            window.0,
-            Some(HWND_TOPMOST),
-            0,
-            0,
-            0,
-            0,
-            SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
-        )?;
-    }
     assert!(window.has_ex_style(WS_EX_TOPMOST));
     set_noactivate_style(window.0, false);
     assert!(!window.has_ex_style(WS_EX_NOACTIVATE));
